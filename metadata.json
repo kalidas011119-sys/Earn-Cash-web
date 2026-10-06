@@ -1,0 +1,6 @@
+{
+  "name": "Earn Cash - Mobile Task & Reward Platform",
+  "description": "Modern mobile-first task and reward earning app with real-time synchronized user and admin panels.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

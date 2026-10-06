@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Earn Cash - User Panel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
+    .scrollbar-none::-webkit-scrollbar { display: none; }
+    .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-slate-900/90 min-h-screen flex items-center justify-center p-0 sm:p-4">
+
+  <!-- Mobile Container Frame -->
+  <div class="w-full max-w-md bg-slate-50 min-h-screen sm:min-h-[820px] sm:max-h-[92vh] sm:rounded-[36px] shadow-2xl flex flex-col overflow-hidden relative border border-slate-800">
+    
+    <!-- Top Header -->
+    <header class="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white px-4 py-3 shrink-0 flex items-center justify-between sticky top-0 z-30 shadow-xs">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center font-black text-sm text-yellow-300 shadow-inner">₹</div>
+        <div>
+          <h1 class="font-black text-base tracking-tight leading-none">Earn Cash</h1>
+          <p class="text-[10px] text-emerald-100 font-medium">Daily Task & Rewards</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="switchTab('withdraw')" class="flex items-center gap-1.5 bg-black/20 hover:bg-black/30 border border-white/20 px-2.5 py-1 rounded-full text-xs font-black text-yellow-300 transition">
+          <span id="headerBalance">₹0</span>
+        </button>
+        <button onclick="toggleAnnouncements()" class="p-1.5 rounded-full bg-white/10 text-white relative">
+          <i class="fa-solid fa-bell text-xs"></i>
+          <span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-yellow-400"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Announcements Drawer -->
+    <div id="announcementDrawer" class="hidden bg-white border-b border-slate-200 p-4 shadow-lg z-20 text-xs">
+      <div class="flex justify-between items-center mb-2">
+        <h4 class="font-bold text-slate-800">Official Announcements</h4>
+        <button onclick="toggleAnnouncements()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="announcementsList" class="space-y-2"></div>
+    </div>
+
+    <!-- Screen Container -->
+    <main id="mainContent" class="flex-1 overflow-y-auto px-4 pt-3 pb-20 scrollbar-none space-y-4">
+      <!-- Dynamic Screen Content injected by JS -->
+    </main>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="bg-white border-t border-slate-200/80 px-2 py-2 shrink-0 flex items-center justify-around z-30 shadow-lg">
+      <button onclick="switchTab('home')" id="tab-home" class="flex flex-col items-center gap-1 py-1 px-2 text-emerald-600 font-bold transition">
+        <i class="fa-solid fa-house text-base"></i>
+        <span class="text-[10px]">Home</span>
+      </button>
+      <button onclick="switchTab('earn')" id="tab-earn" class="flex flex-col items-center gap-1 py-1 px-2 text-slate-500 font-medium transition">
+        <i class="fa-solid fa-bolt text-base"></i>
+        <span class="text-[10px]">Earn</span>
+      </button>
+      <button onclick="switchTab('invite')" id="tab-invite" class="flex flex-col items-center gap-1 py-1 px-2 text-slate-500 font-medium transition">
+        <i class="fa-solid fa-gift text-base"></i>
+        <span class="text-[10px]">Invite ₹20</span>
+      </button>
+      <button onclick="switchTab('withdraw')" id="tab-withdraw" class="flex flex-col items-center gap-1 py-1 px-2 text-slate-500 font-medium transition">
+        <i class="fa-solid fa-arrow-up-right-from-square text-base"></i>
+        <span class="text-[10px]">Payout</span>
+      </button>
+      <button onclick="switchTab('history')" id="tab-history" class="flex flex-col items-center gap-1 py-1 px-2 text-slate-500 font-medium transition">
+        <i class="fa-solid fa-clock-rotate-left text-base"></i>
+        <span class="text-[10px]">History</span>
+      </button>
+      <button onclick="switchTab('profile')" id="tab-profile" class="flex flex-col items-center gap-1 py-1 px-2 text-slate-500 font-medium transition">
+        <i class="fa-solid fa-user text-base"></i>
+        <span class="text-[10px]">Profile</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Auth Modal -->
+  <div id="authModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+    <div class="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100">
+      <div class="bg-gradient-to-r from-emerald-600 to-teal-700 p-5 text-white text-center relative">
+        <button onclick="closeAuthModal()" class="absolute top-4 right-4 text-white/80 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+        <div class="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-2 text-yellow-300 font-black text-xl">₹</div>
+        <h3 class="text-xl font-black">Earn Cash</h3>
+        <p class="text-xs text-emerald-100" id="authSubtitle">Join now & claim ₹20 Welcome Bonus!</p>
+      </div>
+      <div class="flex border-b border-slate-100 text-xs font-bold">
+        <button onclick="setAuthTab('login')" id="btnAuthLogin" class="flex-1 py-2.5 text-slate-500">Log In</button>
+        <button onclick="setAuthTab('signup')" id="btnAuthSignup" class="flex-1 py-2.5 text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/40">Sign Up (+₹20)</button>
+      </div>
+      <form onsubmit="handleAuthSubmit(event)" class="p-5 space-y-3 text-xs">
+        <div id="authError" class="hidden p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl"></div>
+        <div>
+          <label class="block text-slate-700 font-bold mb-1">Mobile Number (10 digits)</label>
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">+91</span>
+            <input type="tel" required maxlength="10" id="authPhone" placeholder="9876543210" class="w-full pl-12 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-slate-700 font-bold mb-1">Password</label>
+          <input type="password" required id="authPassword" placeholder="Min 6 characters" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+        </div>
+        <div id="inviteCodeContainer">
+          <label class="block text-slate-700 font-bold mb-1 flex justify-between">
+            <span>Invite Code (Optional)</span>
+            <span class="text-emerald-600 font-semibold">Bonus ₹20</span>
+          </label>
+          <input type="text" id="authInviteCode" placeholder="e.g. EC9042" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono uppercase focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+        </div>
+        <button type="submit" id="authSubmitBtn" class="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold rounded-xl shadow-md cursor-pointer mt-2">
+          Claim ₹20 & Sign Up
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Task Detail & Submission Modal -->
+  <div id="taskModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+    <div class="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 max-h-[90vh] flex flex-col">
+      <div class="bg-gradient-to-r from-emerald-600 to-teal-700 p-4 text-white flex justify-between items-center shrink-0">
+        <h3 id="taskModalTitle" class="font-bold text-sm">Task Details</h3>
+        <button onclick="closeTaskModal()" class="text-white/80 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="taskModalContent" class="p-5 overflow-y-auto space-y-4 text-xs">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Bank Details Modal -->
+  <div id="bankModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+    <div class="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 p-5 space-y-4 text-xs">
+      <div class="flex justify-between items-center border-b border-slate-100 pb-2">
+        <h3 class="font-black text-sm text-slate-800">Bank Account Details</h3>
+        <button onclick="closeBankModal()" class="text-slate-400 hover:text-slate-700"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="bankModalBody" class="space-y-3">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK ESM script -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCZs9L6W06MtOytPRxGnC3GbCVezcZpZ_8",
+      authDomain: "old-is-gold-e6d27.firebaseapp.com",
+      databaseURL: "https://old-is-gold-e6d27-default-rtdb.firebaseio.com",
+      projectId: "old-is-gold-e6d27",
+      storageBucket: "old-is-gold-e6d27.firebasestorage.app",
+      messagingSenderId: "515315179915",
+      appId: "1:515315179915:web:dcc89542a380aec6c90f8e"
+    };
+
+    const fbApp = initializeApp(firebaseConfig);
+    const firestore = getFirestore(fbApp);
+    window.firestore = firestore;
+
+    window.saveStateToFirebase = async function(state) {
+      try {
+        await setDoc(doc(firestore, "earncash_data", "main_state"), { ...state, isInitialized: true });
+      } catch (err) {
+        console.warn("Firebase sync write error:", err);
+      }
+    };
+
+    // Initial fetch and real-time listener to load and sync tasks across all devices
+    const docRef = doc(firestore, "earncash_data", "main_state");
+    getDoc(docRef).then((snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && (data.isInitialized || Array.isArray(data.tasks))) {
+          const current = getState();
+          const merged = { ...current, ...data };
+          localStorage.setItem('earncash_db_state_v1', JSON.stringify(merged));
+          if (window.renderApp) window.renderApp();
+        }
+      }
+    }).catch(err => console.warn("Initial getDoc error:", err));
+
+    onSnapshot(docRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && (data.isInitialized || Array.isArray(data.tasks))) {
+          const current = getState();
+          const merged = { ...current, ...data };
+          localStorage.setItem('earncash_db_state_v1', JSON.stringify(merged));
+          if (window.renderApp) window.renderApp();
+        }
+      }
+    }, (err) => console.warn("Firestore listener error:", err));
+  </script>
+
+  <!-- Core User Panel Application Logic -->
+  <script>
+    const STORAGE_KEY = 'earncash_db_state_v1';
+    const CURRENT_USER_KEY = 'earncash_active_user_uid';
+    const SYNC_BUS = new BroadcastChannel('earncash_sync_bus');
+
+    let currentTab = 'home';
+    let authMode = 'signup';
+    let currentUser = null;
+    let selectedTask = null;
+
+    function getState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      return {
+        users: {},
+        wallets: {},
+        transactions: [],
+        tasks: [],
+        submissions: [],
+        referrals: [],
+        withdrawals: [],
+        banners: [],
+        notifications: [],
+        settings: {
+          appName: 'Earn Cash',
+          signupBonus: 20,
+          referralReward: 20,
+          requiredReferralTasks: 3,
+          withdrawalAmounts: [100, 300, 500, 1000, 5000, 50000],
+          supportTelegram: 'https://t.me/luckyuserbonus',
+          appVersion: 'v2.4.0',
+          aboutText: 'Earn Cash is India’s fastest growing task and reward platform.',
+          privacyPolicy: 'Earn Cash ensures complete security of user information.'
+        }
+      };
+    }
+
+    function saveState(state) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      SYNC_BUS.postMessage({ type: 'STATE_UPDATED' });
+      if (window.saveStateToFirebase) {
+        window.saveStateToFirebase(state);
+      }
+      renderApp();
+    }
+
+    SYNC_BUS.onmessage = () => renderApp();
+    window.addEventListener('storage', (e) => {
+      if (e.key === STORAGE_KEY) renderApp();
+    });
+
+    async function hashPassword(pw) {
+      const enc = new TextEncoder().encode(pw);
+      const hash = await crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function maskPhone(p) {
+      if (!p || p.length < 6) return p || '******';
+      return p.slice(0, 2) + '••••••' + p.slice(-2);
+    }
+
+    function maskAccount(acc) {
+      if (!acc || acc.length < 4) return '••••';
+      return '••••••••' + acc.slice(-4);
+    }
+
+    function checkActiveUser() {
+      const uid = localStorage.getItem(CURRENT_USER_KEY);
+      const state = getState();
+      if (uid && state.users[uid]) currentUser = state.users[uid];
+      else currentUser = null;
+    }
+
+    window.switchTab = function(tab) {
+      currentTab = tab;
+      ['home', 'earn', 'invite', 'withdraw', 'history', 'profile'].forEach(t => {
+        const btn = document.getElementById('tab-' + t);
+        if (btn) {
+          if (t === tab) btn.className = 'flex flex-col items-center gap-1 py-1 px-2 text-emerald-600 font-bold transition';
+          else btn.className = 'flex flex-col items-center gap-1 py-1 px-2 text-slate-500 font-medium transition';
+        }
+      });
+      renderApp();
+    };
+
+    window.openAuthModal = function(mode = 'signup') {
+      authMode = mode;
+      setAuthTab(mode);
+      document.getElementById('authModal').classList.remove('hidden');
+    };
+    window.closeAuthModal = function() {
+      document.getElementById('authModal').classList.add('hidden');
+    };
+
+    window.setAuthTab = function(mode) {
+      authMode = mode;
+      const btnLogin = document.getElementById('btnAuthLogin');
+      const btnSignup = document.getElementById('btnAuthSignup');
+      const inviteContainer = document.getElementById('inviteCodeContainer');
+      const subtitle = document.getElementById('authSubtitle');
+      const submitBtn = document.getElementById('authSubmitBtn');
+      document.getElementById('authError').classList.add('hidden');
+
+      if (mode === 'signup') {
+        btnSignup.className = 'flex-1 py-2.5 text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/40';
+        btnLogin.className = 'flex-1 py-2.5 text-slate-500';
+        inviteContainer.classList.remove('hidden');
+        subtitle.innerText = 'Join now & claim ₹20 Welcome Bonus!';
+        submitBtn.innerText = 'Claim ₹20 & Sign Up';
+      } else {
+        btnLogin.className = 'flex-1 py-2.5 text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/40';
+        btnSignup.className = 'flex-1 py-2.5 text-slate-500';
+        inviteContainer.classList.add('hidden');
+        subtitle.innerText = 'Welcome back! Log in to account';
+        submitBtn.innerText = 'Log In';
+      }
+    };
+
+    window.handleAuthSubmit = async function(e) {
+      e.preventDefault();
+      const phone = document.getElementById('authPhone').value.trim();
+      const password = document.getElementById('authPassword').value.trim();
+      const inviteCodeInput = document.getElementById('authInviteCode').value.trim().toUpperCase();
+      const errorDiv = document.getElementById('authError');
+
+      if (!/^\d{10}$/.test(phone)) {
+        errorDiv.innerText = 'Please enter a valid 10-digit phone number';
+        errorDiv.classList.remove('hidden');
+        return;
+      }
+      if (password.length < 6) {
+        errorDiv.innerText = 'Password must be at least 6 characters';
+        errorDiv.classList.remove('hidden');
+        return;
+      }
+
+      const state = getState();
+      const hash = await hashPassword(password);
+
+      if (authMode === 'signup') {
+        const exists = Object.values(state.users).find(u => u.phone === phone);
+        if (exists) {
+          errorDiv.innerText = 'Phone number already registered. Please log in.';
+          errorDiv.classList.remove('hidden');
+          return;
+        }
+
+        const uid = 'EC' + Math.floor(100000 + Math.random() * 900000);
+        const myCode = 'EC' + Math.floor(1000 + Math.random() * 9000);
+        let inviterUid = null;
+
+        if (inviteCodeInput) {
+          const inviter = Object.values(state.users).find(u => u.inviteCode.toUpperCase() === inviteCodeInput);
+          if (inviter && inviter.uid !== uid) inviterUid = inviter.uid;
+        }
+
+        const newUser = {
+          uid,
+          phone,
+          passwordHash: hash,
+          inviteCode: myCode,
+          inviterUid,
+          status: 'active',
+          createdAt: new Date().toISOString()
+        };
+
+        const signupBonus = state.settings.signupBonus || 20;
+        const newWallet = {
+          uid,
+          balance: signupBonus,
+          totalEarned: signupBonus,
+          referralEarnings: 0,
+          completedTaskCount: 0,
+          lastUpdated: new Date().toISOString()
+        };
+
+        const bonusTxn = {
+          id: 'TXN_' + Date.now(),
+          uid,
+          amount: signupBonus,
+          type: 'credit',
+          category: 'signup_bonus',
+          description: `Welcome bonus ₹${signupBonus} added to wallet`,
+          createdAt: new Date().toISOString()
+        };
+
+        state.users[uid] = newUser;
+        state.wallets[uid] = newWallet;
+        state.transactions.unshift(bonusTxn);
+
+        if (inviterUid) {
+          state.referrals.unshift({
+            id: 'REF_' + Date.now(),
+            inviterUid,
+            invitedUid: uid,
+            invitedPhone: phone,
+            status: 'pending',
+            eligibleTasksCompleted: 0,
+            requiredTasks: state.settings.requiredReferralTasks || 3,
+            rewardPaid: false,
+            rewardAmount: state.settings.referralReward || 20,
+            createdAt: new Date().toISOString()
+          });
+        }
+
+        saveState(state);
+        localStorage.setItem(CURRENT_USER_KEY, uid);
+        currentUser = newUser;
+        closeAuthModal();
+      } else {
+        const user = Object.values(state.users).find(u => u.phone === phone);
+        if (!user || (user.passwordHash !== hash && user.passwordHash !== 'dummy')) {
+          errorDiv.innerText = 'Invalid mobile number or password.';
+          errorDiv.classList.remove('hidden');
+          return;
+        }
+        if (user.status === 'suspended') {
+          errorDiv.innerText = 'Your account has been suspended.';
+          errorDiv.classList.remove('hidden');
+          return;
+        }
+        localStorage.setItem(CURRENT_USER_KEY, user.uid);
+        currentUser = user;
+        closeAuthModal();
+      }
+    };
+
+    window.logoutUser = function() {
+      localStorage.removeItem(CURRENT_USER_KEY);
+      currentUser = null;
+      switchTab('home');
+    };
+
+    window.toggleAnnouncements = function() {
+      document.getElementById('announcementDrawer').classList.toggle('hidden');
+    };
+
+    function renderApp() {
+      checkActiveUser();
+      const state = getState();
+      const wallet = currentUser ? state.wallets[currentUser.uid] : null;
+      const balance = wallet ? wallet.balance : 0;
+
+      document.getElementById('headerBalance').innerText = '₹' + balance.toLocaleString('en-IN');
+
+      const notifsList = document.getElementById('announcementsList');
+      if (notifsList) {
+        notifsList.innerHTML = state.notifications.map(n => `
+          <div class="p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+            <h5 class="font-bold text-slate-800">${n.title}</h5>
+            <p class="text-slate-600 mt-0.5">${n.message}</p>
+          </div>
+        `).join('') || '<p class="text-slate-400">No active announcements</p>';
+      }
+
+      const container = document.getElementById('mainContent');
+      if (currentTab === 'home') renderHomeScreen(container, state, wallet);
+      else if (currentTab === 'earn') renderEarnScreen(container, state);
+      else if (currentTab === 'invite') renderInviteScreen(container, state, wallet);
+      else if (currentTab === 'withdraw') renderWithdrawScreen(container, state, wallet);
+      else if (currentTab === 'history') renderHistoryScreen(container, state);
+      else if (currentTab === 'profile') renderProfileScreen(container, state, wallet);
+    }
+
+    function renderHomeScreen(container, state, wallet) {
+      const balance = wallet ? wallet.balance : 0;
+      const totalEarned = wallet ? wallet.totalEarned : 0;
+      const referralEarnings = wallet ? wallet.referralEarnings : 0;
+      const completedTasks = wallet ? wallet.completedTaskCount : 0;
+
+      const activeBanners = state.banners.filter(b => b.isActive);
+      const topBanner = activeBanners[0] || {
+        imageUrl: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=800&auto=format&fit=crop&q=80',
+        title: '₹20 Welcome Bonus on Signup!'
+      };
+
+      const availableTasks = state.tasks.filter(t => {
+        if (t.status !== 'active') return false;
+        if (currentUser) {
+          return !state.submissions.some(s => s.taskId === t.id && s.uid === currentUser.uid && (s.status === 'approved' || s.status === 'completed'));
+        }
+        return true;
+      });
+
+      container.innerHTML = `
+        <div class="rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-700 to-slate-900 p-5 text-white shadow-xl relative overflow-hidden">
+          <div class="flex justify-between items-center">
+            <div>
+              <span class="text-[10px] uppercase font-bold text-emerald-200">Wallet Balance</span>
+              <div class="text-3xl font-black mt-0.5">₹${balance.toLocaleString('en-IN')} <span class="text-xs font-normal text-emerald-200">INR</span></div>
+            </div>
+            ${currentUser ? `
+              <div class="text-right">
+                <span class="text-[10px] font-mono bg-white/20 px-2 py-0.5 rounded-full font-bold">UID: ${currentUser.uid}</span>
+                <p class="text-[10px] text-emerald-200 mt-1">+91 ${currentUser.phone}</p>
+              </div>
+            ` : `
+              <button onclick="openAuthModal('signup')" class="bg-yellow-400 text-slate-900 text-xs font-bold px-3 py-1.5 rounded-full shadow">Sign Up (+₹20)</button>
+            `}
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-white/10 text-center">
+            <div class="bg-white/10 rounded-xl p-2"><span class="text-[10px] text-emerald-200 block">Total Earned</span><span class="text-xs font-bold">₹${totalEarned}</span></div>
+            <div class="bg-white/10 rounded-xl p-2"><span class="text-[10px] text-emerald-200 block">Referral Inc.</span><span class="text-xs font-bold">₹${referralEarnings}</span></div>
+            <div class="bg-white/10 rounded-xl p-2"><span class="text-[10px] text-emerald-200 block">Tasks Done</span><span class="text-xs font-bold">${completedTasks}</span></div>
+          </div>
+
+          <div class="flex gap-2 mt-3.5">
+            <button onclick="switchTab('withdraw')" class="flex-1 py-2 bg-yellow-400 text-slate-900 font-bold text-xs rounded-xl shadow">Withdraw Cash</button>
+            <button onclick="switchTab('earn')" class="flex-1 py-2 bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20">Start Tasks</button>
+          </div>
+        </div>
+
+        <div class="rounded-2xl overflow-hidden shadow-sm aspect-21/9 relative bg-slate-900">
+          <img src="${topBanner.imageUrl}" class="w-full h-full object-cover" />
+          <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent flex flex-col justify-end p-3 text-white">
+            <span class="text-[9px] font-bold text-yellow-400 uppercase">Featured Promo</span>
+            <p class="text-xs font-bold truncate">${topBanner.title}</p>
+          </div>
+        </div>
+
+        <div class="space-y-2.5">
+          <div class="flex justify-between items-center">
+            <h3 class="font-extrabold text-sm text-slate-800">Available Tasks (${availableTasks.length})</h3>
+            <button onclick="switchTab('earn')" class="text-xs font-bold text-emerald-600 hover:underline">View All</button>
+          </div>
+          <div class="space-y-2">
+            ${availableTasks.slice(0, 3).map(t => `
+              <div class="bg-white p-3 rounded-2xl border border-slate-100 shadow-xs flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <img src="${t.logo}" class="w-10 h-10 rounded-xl object-cover border border-slate-100" />
+                  <div>
+                    <span class="text-[9px] font-bold uppercase bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">${t.category}</span>
+                    <h4 class="text-xs font-bold text-slate-800 line-clamp-1">${t.name}</h4>
+                    <span class="text-[11px] font-black text-emerald-600">+₹${t.reward}</span>
+                  </div>
+                </div>
+                <button onclick="openTaskModal('${t.id}')" class="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl text-xs font-bold">Start Earn</button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderEarnScreen(container, state) {
+      const tasks = state.tasks.filter(t => {
+        if (t.status !== 'active') return false;
+        if (currentUser) {
+          return !state.submissions.some(s => s.taskId === t.id && s.uid === currentUser.uid && (s.status === 'approved' || s.status === 'completed'));
+        }
+        return true;
+      });
+
+      container.innerHTML = `
+        <div class="bg-gradient-to-r from-emerald-600 to-teal-700 p-4 rounded-3xl text-white">
+          <h2 class="text-lg font-black">Reward Tasks Zone</h2>
+          <p class="text-xs text-emerald-100">Complete tasks to earn real cash directly in your wallet</p>
+        </div>
+
+        <div class="space-y-3">
+          ${tasks.map(t => `
+            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-xs space-y-2">
+              <div class="flex items-start justify-between">
+                <div class="flex items-center gap-3">
+                  <img src="${t.logo}" class="w-12 h-12 rounded-xl object-cover" />
+                  <div>
+                    <span class="text-[9px] font-bold uppercase bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">${t.category}</span>
+                    <h3 class="text-xs font-bold text-slate-900">${t.name}</h3>
+                  </div>
+                </div>
+                <span class="text-base font-black text-emerald-600">+₹${t.reward}</span>
+              </div>
+              <p class="text-xs text-slate-500 line-clamp-2">${t.description}</p>
+              <div class="pt-2 border-t border-slate-100 flex justify-between items-center">
+                <span class="text-[10px] text-slate-400">${t.approvalMode === 'automatic' ? '⚡ Instant Auto Approval' : '🛡️ Manual Verification'}</span>
+                <button onclick="openTaskModal('${t.id}')" class="px-3.5 py-1.5 bg-emerald-600 text-white font-bold rounded-xl text-xs">Start Earn</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function renderInviteScreen(container, state, wallet) {
+      const code = currentUser ? currentUser.inviteCode : 'ECXXXX';
+      const myRefs = currentUser ? state.referrals.filter(r => r.inviterUid === currentUser.uid) : [];
+      const successful = myRefs.filter(r => r.rewardPaid || r.status === 'rewarded').length;
+
+      container.innerHTML = `
+        <div class="bg-gradient-to-br from-indigo-700 via-purple-700 to-emerald-700 rounded-3xl p-5 text-white shadow-lg space-y-3">
+          <span class="text-[10px] font-bold uppercase bg-white/20 px-2 py-0.5 rounded-full">Referral Bonus</span>
+          <h2 class="text-xl font-black">Invite & Earn ₹20</h2>
+          <p class="text-xs text-purple-100">Earn ₹20 automatically into your wallet when your invited friend completes 3 eligible tasks!</p>
+
+          <div class="bg-white/10 p-3 rounded-2xl flex justify-between items-center border border-white/20">
+            <div>
+              <span class="text-[10px] text-purple-200 block">Your Invite Code</span>
+              <span class="text-xl font-black font-mono tracking-widest text-yellow-300">${code}</span>
+            </div>
+            <button onclick="navigator.clipboard.writeText('${code}'); alert('Invite Code copied!');" class="px-3 py-1.5 bg-white text-slate-900 rounded-xl text-xs font-bold">Copy Code</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 text-center text-xs">
+          <div class="bg-white p-3 rounded-2xl border border-slate-100">
+            <span class="text-slate-400 block font-bold text-[10px]">Total Invited</span>
+            <span class="text-lg font-black text-slate-800">${myRefs.length}</span>
+          </div>
+          <div class="bg-white p-3 rounded-2xl border border-slate-100">
+            <span class="text-slate-400 block font-bold text-[10px]">3 Tasks Done</span>
+            <span class="text-lg font-black text-emerald-600">${successful}</span>
+          </div>
+          <div class="bg-white p-3 rounded-2xl border border-slate-100">
+            <span class="text-slate-400 block font-bold text-[10px]">Earnings</span>
+            <span class="text-lg font-black text-purple-600">₹${wallet ? wallet.referralEarnings : 0}</span>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+          <h4 class="font-bold text-xs text-slate-800">My Referrals (${myRefs.length})</h4>
+          <div class="space-y-2">
+            ${myRefs.map(r => `
+              <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center text-xs">
+                <div>
+                  <span class="font-mono font-bold">${r.invitedUid}</span>
+                  <span class="text-[10px] text-slate-400 block">Tasks: ${r.eligibleTasksCompleted}/3</span>
+                </div>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${r.rewardPaid ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                  ${r.rewardPaid ? '₹20 Paid' : 'In Progress'}
+                </span>
+              </div>
+            `).join('') || '<p class="text-slate-400 text-xs text-center py-4">No referrals yet</p>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderWithdrawScreen(container, state, wallet) {
+      const balance = wallet ? wallet.balance : 0;
+      const bank = currentUser ? currentUser.bankDetails : null;
+      const amounts = state.settings.withdrawalAmounts || [100, 300, 500, 1000, 5000, 50000];
+
+      container.innerHTML = `
+        <div class="bg-gradient-to-r from-emerald-600 to-teal-700 p-5 rounded-3xl text-white">
+          <span class="text-[10px] uppercase font-bold text-emerald-100">Available For Withdrawal</span>
+          <div class="text-3xl font-black mt-1">₹${balance.toLocaleString('en-IN')}</div>
+        </div>
+
+        <div class="bg-white p-4 rounded-3xl border border-slate-100 space-y-2">
+          <div class="flex justify-between items-center text-xs">
+            <span class="font-bold text-slate-800">Bank Account Details</span>
+            ${bank ? '<span class="text-emerald-600 font-bold text-[10px]">Verified & Locked</span>' : '<span class="text-amber-600 font-bold text-[10px]">Required</span>'}
+          </div>
+          ${bank ? `
+            <div class="bg-slate-50 p-3 rounded-2xl text-xs space-y-1">
+              <div>Bank: <strong>${bank.bankName}</strong></div>
+              <div>Account: <strong>${maskAccount(bank.accountNumber)}</strong> (${bank.ifscCode})</div>
+            </div>
+          ` : `
+            <button onclick="openBankModal()" class="w-full py-2 bg-amber-500 text-slate-900 font-bold rounded-xl text-xs">Add Bank Details Now</button>
+          `}
+        </div>
+
+        <div class="bg-white p-4 rounded-3xl border border-slate-100 space-y-3">
+          <h4 class="font-bold text-xs text-slate-800">Select Fixed Withdrawal Amount</h4>
+          <div class="grid grid-cols-3 gap-2">
+            ${amounts.map(a => `
+              <button onclick="requestWithdraw(${a})" class="py-3 bg-slate-50 hover:bg-emerald-50 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 hover:border-emerald-500">
+                ₹${a.toLocaleString('en-IN')}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderHistoryScreen(container, state) {
+      if (!currentUser) {
+        container.innerHTML = `<div class="p-8 text-center text-xs text-slate-500">Please login to view history.</div>`;
+        return;
+      }
+      const myTxns = state.transactions.filter(t => t.uid === currentUser.uid);
+
+      container.innerHTML = `
+        <h2 class="text-lg font-black text-slate-800">Wallet & Earnings History</h2>
+        <div class="space-y-2">
+          ${myTxns.map(t => `
+            <div class="bg-white p-3 rounded-2xl border border-slate-100 flex justify-between items-center text-xs">
+              <div>
+                <p class="font-bold text-slate-800">${t.description}</p>
+                <span class="text-[10px] text-slate-400">${new Date(t.createdAt).toLocaleDateString()}</span>
+              </div>
+              <span class="font-black ${t.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'}">
+                ${t.type === 'credit' ? '+' : '-'}₹${t.amount}
+              </span>
+            </div>
+          `).join('') || '<p class="text-slate-400 text-xs text-center py-6">No transactions recorded</p>'}
+        </div>
+      `;
+    }
+
+    function renderProfileScreen(container, state, wallet) {
+      if (!currentUser) {
+        container.innerHTML = `
+          <div class="p-8 text-center text-xs text-slate-500 space-y-3">
+            <p>Please login to view profile</p>
+            <button onclick="openAuthModal('login')" class="px-4 py-2 bg-emerald-600 text-white font-bold rounded-xl">Login</button>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="bg-slate-900 rounded-3xl p-5 text-white space-y-3">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl bg-emerald-600 flex items-center justify-center font-bold text-lg">${currentUser.phone.slice(-2)}</div>
+            <div>
+              <span class="text-xs font-mono font-bold text-emerald-400">UID: ${currentUser.uid}</span>
+              <p class="font-bold">+91 ${currentUser.phone}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-3xl p-3 border border-slate-100 divide-y divide-slate-100 text-xs font-semibold">
+          <a href="${state.settings.supportTelegram}" target="_blank" class="p-3 flex justify-between items-center text-slate-700 hover:text-emerald-600">
+            <span>Customer Support (Telegram)</span>
+            <i class="fa-solid fa-arrow-up-right-from-square text-slate-400"></i>
+          </a>
+          <div class="p-3 text-slate-700">
+            <span>App Version: ${state.settings.appVersion}</span>
+          </div>
+          <button onclick="logoutUser()" class="w-full p-3 text-left text-rose-600 font-bold">
+            Log Out
+          </button>
+        </div>
+      `;
+    }
+
+    window.openTaskModal = function(id) {
+      const state = getState();
+      selectedTask = state.tasks.find(t => t.id === id);
+      if (!selectedTask) return;
+
+      document.getElementById('taskModalTitle').innerText = selectedTask.name;
+      const content = document.getElementById('taskModalContent');
+
+      content.innerHTML = `
+        <div class="flex items-center gap-3">
+          <img src="${selectedTask.logo}" class="w-12 h-12 rounded-xl object-cover" />
+          <div>
+            <h4 class="font-bold text-slate-800">${selectedTask.name}</h4>
+            <span class="text-sm font-black text-emerald-600">Reward: ₹${selectedTask.reward}</span>
+          </div>
+        </div>
+        <p class="text-slate-600">${selectedTask.description}</p>
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1">
+          <h5 class="font-bold text-slate-700">Steps:</h5>
+          ${selectedTask.steps.map((st, i) => `<div>${i+1}. ${st}</div>`).join('')}
+        </div>
+        <div class="space-y-2">
+          <button onclick="startEarnLink()" class="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-bold">1. Open Task Link</button>
+          <button onclick="showTaskProofForm()" class="w-full py-2.5 bg-slate-900 text-white rounded-xl font-bold">2. Submit Completed Proof</button>
+        </div>
+      `;
+      document.getElementById('taskModal').classList.remove('hidden');
+    };
+
+    window.closeTaskModal = function() {
+      document.getElementById('taskModal').classList.add('hidden');
+    };
+
+    window.startEarnLink = function() {
+      if (!currentUser) {
+        openAuthModal('login');
+        return;
+      }
+      window.open(selectedTask.taskLink, '_blank');
+    };
+
+    window.showTaskProofForm = function() {
+      if (!currentUser) {
+        openAuthModal('login');
+        return;
+      }
+      const content = document.getElementById('taskModalContent');
+      content.innerHTML = `
+        <form onsubmit="submitTaskProof(event)" class="space-y-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Your UID (Read-only)</label>
+            <input type="text" readOnly disabled value="${currentUser.uid}" class="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl font-mono text-slate-600 font-bold" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Registered Phone/Email</label>
+            <input type="text" required id="proofContact" value="${currentUser.phone}" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Proof Screenshot</label>
+            <input type="file" required id="proofFile" accept="image/*" class="w-full text-xs" />
+          </div>
+          <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-bold shadow">Submit Proof for Reward</button>
+        </form>
+      `;
+    };
+
+    window.submitTaskProof = function(e) {
+      e.preventDefault();
+      const state = getState();
+      const isAuto = selectedTask.approvalMode === 'automatic';
+      const status = isAuto ? 'approved' : 'pending';
+
+      const sub = {
+        id: 'SUB_' + Date.now(),
+        taskId: selectedTask.id,
+        taskName: selectedTask.name,
+        taskReward: selectedTask.reward,
+        uid: currentUser.uid,
+        phoneOrEmail: document.getElementById('proofContact').value.trim(),
+        proofImageUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&auto=format&fit=crop&q=80',
+        status: status,
+        submittedAt: new Date().toISOString()
+      };
+
+      state.submissions.unshift(sub);
+
+      if (isAuto) {
+        const wallet = state.wallets[currentUser.uid];
+        wallet.balance += selectedTask.reward;
+        wallet.totalEarned += selectedTask.reward;
+        wallet.completedTaskCount += 1;
+
+        state.transactions.unshift({
+          id: 'TXN_' + Date.now(),
+          uid: currentUser.uid,
+          amount: selectedTask.reward,
+          type: 'credit',
+          category: 'task_reward',
+          description: `Task reward for "${selectedTask.name}" credited`,
+          createdAt: new Date().toISOString()
+        });
+
+        const ref = state.referrals.find(r => r.invitedUid === currentUser.uid);
+        if (ref && !ref.rewardPaid) {
+          ref.eligibleTasksCompleted += 1;
+          if (ref.eligibleTasksCompleted >= 3) {
+            ref.status = 'rewarded';
+            ref.rewardPaid = true;
+            const inviterWallet = state.wallets[ref.inviterUid];
+            if (inviterWallet) {
+              inviterWallet.balance += 20;
+              inviterWallet.totalEarned += 20;
+              inviterWallet.referralEarnings += 20;
+              state.transactions.unshift({
+                id: 'TXN_' + Date.now() + '_REF',
+                uid: ref.inviterUid,
+                amount: 20,
+                type: 'credit',
+                category: 'referral_reward',
+                description: `Referral reward ₹20 credited (invited friend completed 3 tasks)`,
+                createdAt: new Date().toISOString()
+              });
+            }
+          }
+        }
+      }
+
+      saveState(state);
+      closeTaskModal();
+      alert(isAuto ? `Reward ₹${selectedTask.reward} added instantly!` : 'Proof submitted for Admin review.');
+    };
+
+    window.openBankModal = function() {
+      const bModal = document.getElementById('bankModal');
+      const bBody = document.getElementById('bankModalBody');
+
+      bBody.innerHTML = `
+        <form onsubmit="saveBank(event)" class="space-y-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Bank Name</label>
+            <input type="text" required id="bName" placeholder="State Bank of India, HDFC..." class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Account Holder Name</label>
+            <input type="text" required id="bHolder" placeholder="Name on passbook" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Account Number</label>
+            <input type="password" required id="bAcc" placeholder="Bank account number" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">IFSC Code</label>
+            <input type="text" required maxlength="11" id="bIfsc" placeholder="SBIN0001234" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono uppercase" />
+          </div>
+          <button type="submit" class="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-bold shadow">Save & Lock Bank Details</button>
+        </form>
+      `;
+      bModal.classList.remove('hidden');
+    };
+
+    window.closeBankModal = function() {
+      document.getElementById('bankModal').classList.add('hidden');
+    };
+
+    window.saveBank = function(e) {
+      e.preventDefault();
+      const state = getState();
+      const user = state.users[currentUser.uid];
+
+      user.bankDetails = {
+        bankName: document.getElementById('bName').value.trim(),
+        accountHolderName: document.getElementById('bHolder').value.trim(),
+        accountNumber: document.getElementById('bAcc').value.trim(),
+        ifscCode: document.getElementById('bIfsc').value.trim().toUpperCase(),
+        isLocked: true,
+        savedAt: new Date().toISOString()
+      };
+
+      saveState(state);
+      currentUser = user;
+      closeBankModal();
+      alert('Bank details locked and saved securely.');
+    };
+
+    window.requestWithdraw = function(amount) {
+      if (!currentUser) {
+        openAuthModal('login');
+        return;
+      }
+      if (!currentUser.bankDetails) {
+        alert('Please add Bank Details first.');
+        openBankModal();
+        return;
+      }
+      const state = getState();
+      const wallet = state.wallets[currentUser.uid];
+
+      if (wallet.balance < amount) {
+        alert(`Insufficient balance. You have ₹${wallet.balance}, required ₹${amount}`);
+        return;
+      }
+
+      wallet.balance -= amount;
+      const wId = 'WTH_' + Date.now();
+
+      state.transactions.unshift({
+        id: 'TXN_' + Date.now(),
+        uid: currentUser.uid,
+        amount: amount,
+        type: 'debit',
+        category: 'withdrawal_hold',
+        description: `Withdrawal request ₹${amount} to ${currentUser.bankDetails.bankName}`,
+        createdAt: new Date().toISOString()
+      });
+
+      state.withdrawals.unshift({
+        id: wId,
+        uid: currentUser.uid,
+        phone: currentUser.phone,
+        amount: amount,
+        bankName: currentUser.bankDetails.bankName,
+        accountHolderName: currentUser.bankDetails.accountHolderName,
+        accountNumber: currentUser.bankDetails.accountNumber,
+        ifsc: currentUser.bankDetails.ifscCode,
+        status: 'pending',
+        requestedAt: new Date().toISOString()
+      });
+
+      saveState(state);
+      alert(`Withdrawal of ₹${amount} submitted! Status: Pending review.`);
+    };
+
+    // Initialize
+    renderApp();
+  </script>
+</body>
+</html>

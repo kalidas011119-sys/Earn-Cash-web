@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Earn Cash - Admin Authority Panel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
+    .scrollbar-none::-webkit-scrollbar { display: none; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+  <div id="adminRoot"></div>
+
+  <!-- Firebase SDK ESM script -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCZs9L6W06MtOytPRxGnC3GbCVezcZpZ_8",
+      authDomain: "old-is-gold-e6d27.firebaseapp.com",
+      databaseURL: "https://old-is-gold-e6d27-default-rtdb.firebaseio.com",
+      projectId: "old-is-gold-e6d27",
+      storageBucket: "old-is-gold-e6d27.firebasestorage.app",
+      messagingSenderId: "515315179915",
+      appId: "1:515315179915:web:dcc89542a380aec6c90f8e"
+    };
+
+    const fbApp = initializeApp(firebaseConfig);
+    const firestore = getFirestore(fbApp);
+    window.firestore = firestore;
+  </script>
+
+  <!-- Admin Panel Application Logic -->
+  <script>
+    const STORAGE_KEY = 'earncash_db_state_v1';
+    const ADMIN_SESSION_KEY = 'earncash_admin_session';
+    const SYNC_BUS = new BroadcastChannel('earncash_sync_bus');
+
+    let isAdminLoggedIn = sessionStorage.getItem(ADMIN_SESSION_KEY) === 'true';
+    let currentAdminTab = 'dashboard';
+
+    function getState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      return {
+        users: {},
+        wallets: {},
+        transactions: [],
+        tasks: [],
+        submissions: [],
+        referrals: [],
+        withdrawals: [],
+        banners: [],
+        notifications: [],
+        auditLogs: [],
+        settings: {
+          appName: 'Earn Cash',
+          signupBonus: 20,
+          referralReward: 20,
+          requiredReferralTasks: 3,
+          withdrawalAmounts: [100, 300, 500, 1000, 5000, 50000],
+          supportTelegram: 'https://t.me/luckyuserbonus',
+          appVersion: 'v2.4.0',
+          aboutText: 'Earn Cash is India’s fastest growing task and reward platform.',
+          privacyPolicy: 'Earn Cash ensures complete security of user information.'
+        }
+      };
+    }
+
+    function saveState(state) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      SYNC_BUS.postMessage({ type: 'STATE_UPDATED' });
+      renderAdmin();
+    }
+
+    SYNC_BUS.onmessage = () => {
+      renderAdmin();
+    };
+
+    window.addEventListener('storage', (e) => {
+      if (e.key === STORAGE_KEY) renderAdmin();
+    });
+
+    function addAuditLog(action, target, details) {
+      const state = getState();
+      state.auditLogs = state.auditLogs || [];
+      state.auditLogs.unshift({
+        id: 'LOG_' + Date.now(),
+        adminId: '8471835378',
+        action,
+        targetRecord: target,
+        details,
+        timestamp: new Date().toISOString()
+      });
+      saveState(state);
+    }
+
+    window.handleAdminLogin = function(e) {
+      e.preventDefault();
+      const phone = document.getElementById('admPhone').value.trim();
+      const pass = document.getElementById('admPass').value.trim();
+
+      if ((phone === '8471835378' || phone === 'admin@earncash.com') && pass === 'Nayan@@123') {
+        isAdminLoggedIn = true;
+        sessionStorage.setItem(ADMIN_SESSION_KEY, 'true');
+        addAuditLog('ADMIN_LOGIN', 'Session', 'Admin logged in with verified credentials');
+        renderAdmin();
+      } else {
+        document.getElementById('loginErr').innerText = 'Invalid credentials. Use 8471835378 / Nayan@@123';
+        document.getElementById('loginErr').classList.remove('hidden');
+      }
+    };
+
+    window.adminLogout = function() {
+      isAdminLoggedIn = false;
+      sessionStorage.removeItem(ADMIN_SESSION_KEY);
+      renderAdmin();
+    };
+
+    window.switchAdminTab = function(tab) {
+      currentAdminTab = tab;
+      renderAdmin();
+    };
+
+    function renderAdmin() {
+      const root = document.getElementById('adminRoot');
+      if (!isAdminLoggedIn) {
+        root.innerHTML = `
+          <div class="min-h-screen flex items-center justify-center p-4">
+            <div class="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
+              <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-gradient-to-tr from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-amber-500/20 text-slate-950 text-2xl font-black">
+                  <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <h1 class="text-2xl font-black text-white">Earn Cash Admin</h1>
+                <p class="text-xs text-slate-400 mt-1">Authorized Administration & Financial Control</p>
+              </div>
+
+              <div id="loginErr" class="hidden mb-4 p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-xl"></div>
+
+              <form onsubmit="handleAdminLogin(event)" class="space-y-4 text-xs">
+                <div>
+                  <label class="block text-slate-300 font-bold mb-1">Admin Phone / Email</label>
+                  <input type="text" id="admPhone" value="8471835378" required class="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono" />
+                  <span class="text-[10px] text-slate-500 mt-1 block">Default: 8471835378</span>
+                </div>
+                <div>
+                  <label class="block text-slate-300 font-bold mb-1">Password</label>
+                  <input type="password" id="admPass" value="Nayan@@123" required class="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white" />
+                  <span class="text-[10px] text-slate-500 mt-1 block">Default: Nayan@@123</span>
+                </div>
+                <button type="submit" class="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black rounded-xl text-sm shadow-lg hover:opacity-95">Sign In to Dashboard</button>
+              </form>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const state = getState();
+      const pendingSubs = state.submissions.filter(s => s.status === 'pending').length;
+      const pendingWths = state.withdrawals.filter(w => w.status === 'pending').length;
+
+      root.innerHTML = `
+        <div class="min-h-screen flex flex-col lg:flex-row">
+          <!-- Sidebar -->
+          <aside class="w-full lg:w-72 bg-slate-900 border-r border-slate-800 flex flex-col justify-between shrink-0 p-5 space-y-4">
+            <div>
+              <div class="flex items-center gap-3 pb-5 border-b border-slate-800">
+                <div class="w-10 h-10 rounded-2xl bg-amber-500 flex items-center justify-center font-black text-slate-950 text-xl shadow">₹</div>
+                <div>
+                  <h2 class="font-black text-base tracking-tight text-white leading-none">Earn Cash</h2>
+                  <span class="text-[10px] text-amber-400 font-bold uppercase">Admin Authority</span>
+                </div>
+              </div>
+
+              <div class="my-4 p-3 bg-slate-800/80 rounded-2xl flex items-center justify-between text-xs">
+                <div>
+                  <span class="text-[10px] text-slate-400 block uppercase">Operator</span>
+                  <span class="font-mono font-bold text-white">8471835378</span>
+                </div>
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              </div>
+
+              <nav class="space-y-1 text-xs font-bold">
+                <button onclick="switchAdminTab('dashboard')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition ${currentAdminTab === 'dashboard' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}">
+                  <i class="fa-solid fa-chart-line w-4"></i> Dashboard
+                </button>
+                <button onclick="switchAdminTab('users')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition ${currentAdminTab === 'users' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}">
+                  <i class="fa-solid fa-users w-4"></i> Users
+                </button>
+                <button onclick="switchAdminTab('tasks')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition ${currentAdminTab === 'tasks' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}">
+                  <i class="fa-solid fa-bolt w-4"></i> Task Campaigns
+                </button>
+                <button onclick="switchAdminTab('submissions')" class="w-full flex justify-between items-center px-3 py-2.5 rounded-xl transition ${currentAdminTab === 'submissions' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}">
+                  <div class="flex items-center gap-3"><i class="fa-solid fa-check-to-slot w-4"></i> Submissions</div>
+                  ${pendingSubs > 0 ? `<span class="bg-amber-400 text-slate-950 text-[10px] px-2 py-0.5 rounded-full font-black">${pendingSubs}</span>` : ''}
+                </button>
+                <button onclick="switchAdminTab('withdrawals')" class="w-full flex justify-between items-center px-3 py-2.5 rounded-xl transition ${currentAdminTab === 'withdrawals' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}">
+                  <div class="flex items-center gap-3"><i class="fa-solid fa-money-bill-transfer w-4"></i> Payouts</div>
+                  ${pendingWths > 0 ? `<span class="bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-black">${pendingWths}</span>` : ''}
+                </button>
+                <button onclick="switchAdminTab('referrals')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition ${currentAdminTab === 'referrals' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}">
+                  <i class="fa-solid fa-gift w-4"></i> Referrals
+                </button>
+                <button onclick="switchAdminTab('settings')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition ${currentAdminTab === 'settings' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}">
+                  <i class="fa-solid fa-sliders w-4"></i> Global Settings
+                </button>
+                <button onclick="switchAdminTab('audit')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition ${currentAdminTab === 'audit' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}">
+                  <i class="fa-solid fa-clock-rotate-left w-4"></i> Audit Trail
+                </button>
+              </nav>
+            </div>
+
+            <button onclick="adminLogout()" class="w-full py-2.5 bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400 font-bold rounded-xl text-xs transition">Sign Out Admin</button>
+          </aside>
+
+          <!-- Main Content Area -->
+          <main class="flex-1 p-6 lg:p-8 overflow-y-auto">
+            <div id="adminTabContent"></div>
+          </main>
+        </div>
+      `;
+
+      renderTabContent(state);
+    }
+
+    function renderTabContent(state) {
+      const container = document.getElementById('adminTabContent');
+      if (currentAdminTab === 'dashboard') {
+        const totalUsers = Object.keys(state.users).length;
+        const totalTasks = state.tasks.length;
+        const pendingSubs = state.submissions.filter(s => s.status === 'pending').length;
+        const approvedSubs = state.submissions.filter(s => s.status === 'approved' || s.status === 'completed').length;
+        const pendingWths = state.withdrawals.filter(w => w.status === 'pending').length;
+        const totalBal = Object.values(state.wallets).reduce((sum, w) => sum + (w.balance || 0), 0);
+
+        container.innerHTML = `
+          <h2 class="text-2xl font-black mb-4">Executive Admin Overview</h2>
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+              <span class="text-xs font-bold text-slate-400">Total Users</span>
+              <p class="text-2xl font-black text-white mt-1">${totalUsers}</p>
+            </div>
+            <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+              <span class="text-xs font-bold text-slate-400">Active Tasks</span>
+              <p class="text-2xl font-black text-amber-400 mt-1">${totalTasks}</p>
+            </div>
+            <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+              <span class="text-xs font-bold text-slate-400">Pending Reviews</span>
+              <p class="text-2xl font-black text-amber-400 mt-1">${pendingSubs}</p>
+            </div>
+            <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+              <span class="text-xs font-bold text-slate-400">Approved Tasks</span>
+              <p class="text-2xl font-black text-emerald-400 mt-1">${approvedSubs}</p>
+            </div>
+            <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+              <span class="text-xs font-bold text-slate-400">Pending Payouts</span>
+              <p class="text-2xl font-black text-rose-400 mt-1">${pendingWths}</p>
+            </div>
+            <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+              <span class="text-xs font-bold text-slate-400">Total Wallet Hold</span>
+              <p class="text-2xl font-black text-purple-400 mt-1">₹${totalBal.toLocaleString('en-IN')}</p>
+            </div>
+          </div>
+        `;
+      } else if (currentAdminTab === 'tasks') {
+        const tasks = state.tasks || [];
+        container.innerHTML = `
+          <div class="flex justify-between items-center mb-4">
+            <div>
+              <h2 class="text-xl font-black text-white">Task Campaigns Management (${tasks.length})</h2>
+              <p class="text-xs text-slate-400">Delete or manage active task campaigns</p>
+            </div>
+            <button onclick="openAddTaskModal()" class="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold rounded-xl text-xs shadow hover:opacity-95 cursor-pointer">+ Add Task</button>
+          </div>
+          <div class="bg-slate-900 rounded-3xl border border-slate-800 overflow-x-auto text-xs">
+            <table class="w-full text-left">
+              <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px]">
+                <tr>
+                  <th class="p-3">Task Name</th>
+                  <th class="p-3">Category</th>
+                  <th class="p-3">Reward</th>
+                  <th class="p-3">Approval</th>
+                  <th class="p-3">Status</th>
+                  <th class="p-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800">
+                ${tasks.map(t => `
+                  <tr>
+                    <td class="p-3">
+                      <div class="font-bold text-white">${t.name}</div>
+                      <div class="text-[10px] text-slate-500 font-mono">ID: ${t.id}</div>
+                    </td>
+                    <td class="p-3 text-slate-400">${t.category}</td>
+                    <td class="p-3 text-emerald-400 font-black">₹${t.reward}</td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${t.approvalMode === 'automatic' ? 'bg-amber-400/20 text-amber-300' : 'bg-blue-500/20 text-blue-300'}">${t.approvalMode}</span></td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${t.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}">${t.status}</span></td>
+                    <td class="p-3 text-right">
+                      <button onclick="deleteTaskDirect('${t.id}')" class="px-2.5 py-1 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-600/50 rounded-lg font-bold text-xs cursor-pointer transition">
+                        <i class="fa-solid fa-trash mr-1"></i> Delete
+                      </button>
+                    </td>
+                  </tr>
+                `).join('') || '<tr><td colspan="6" class="p-6 text-center text-slate-500">No tasks created yet</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else if (currentAdminTab === 'submissions') {
+        const subs = state.submissions;
+        container.innerHTML = `
+          <h2 class="text-xl font-black mb-4">Task Submissions Review (${subs.length})</h2>
+          <div class="bg-slate-900 rounded-3xl border border-slate-800 overflow-x-auto text-xs">
+            <table class="w-full text-left">
+              <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px] p-3">
+                <tr><th class="p-3">ID</th><th class="p-3">UID</th><th class="p-3">Task</th><th class="p-3">Reward</th><th class="p-3">Status</th><th class="p-3 text-right">Action</th></tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800">
+                ${subs.map(s => `
+                  <tr>
+                    <td class="p-3 font-mono text-amber-400">${s.id}</td>
+                    <td class="p-3 font-mono">${s.uid}</td>
+                    <td class="p-3">${s.taskName}</td>
+                    <td class="p-3 text-emerald-400 font-bold">+₹${s.taskReward}</td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded-full capitalize text-[10px] font-bold ${s.status === 'approved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}">${s.status}</span></td>
+                    <td class="p-3 text-right">
+                      ${s.status === 'pending' ? `
+                        <button onclick="approveSub('${s.id}')" class="px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold">Approve</button>
+                        <button onclick="rejectSub('${s.id}')" class="px-2.5 py-1 bg-rose-600 text-white rounded-lg font-bold">Reject</button>
+                      ` : '<span class="text-slate-500">Processed</span>'}
+                    </td>
+                  </tr>
+                `).join('') || '<tr><td colspan="6" class="p-6 text-center text-slate-500">No submissions</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else if (currentAdminTab === 'withdrawals') {
+        const wths = state.withdrawals;
+        container.innerHTML = `
+          <h2 class="text-xl font-black mb-4">Payout Requests (${wths.length})</h2>
+          <div class="bg-slate-900 rounded-3xl border border-slate-800 overflow-x-auto text-xs">
+            <table class="w-full text-left">
+              <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px]">
+                <tr><th class="p-3">ID</th><th class="p-3">UID</th><th class="p-3">Amount</th><th class="p-3">Bank Details</th><th class="p-3">Status</th><th class="p-3 text-right">Action</th></tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800">
+                ${wths.map(w => `
+                  <tr>
+                    <td class="p-3 font-mono text-amber-400">${w.id}</td>
+                    <td class="p-3 font-mono">${w.uid}</td>
+                    <td class="p-3 text-emerald-400 font-black text-sm">₹${w.amount}</td>
+                    <td class="p-3 font-mono text-[11px]">${w.bankName} - ${w.accountNumber} (${w.ifsc})</td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded-full capitalize text-[10px] font-bold ${w.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}">${w.status}</span></td>
+                    <td class="p-3 text-right">
+                      ${w.status === 'pending' || w.status === 'processing' ? `
+                        <button onclick="completeWithdraw('${w.id}')" class="px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold">Complete</button>
+                        <button onclick="rejectWithdraw('${w.id}')" class="px-2.5 py-1 bg-rose-600 text-white rounded-lg font-bold">Reject & Refund</button>
+                      ` : '<span class="text-slate-500">Processed</span>'}
+                    </td>
+                  </tr>
+                `).join('') || '<tr><td colspan="6" class="p-6 text-center text-slate-500">No withdrawals</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else {
+        container.innerHTML = `<div class="p-6 bg-slate-900 border border-slate-800 rounded-3xl text-sm">Please navigate through the sidebar tabs. Full synchronization is active.</div>`;
+      }
+    }
+
+    window.deleteTaskDirect = function(taskId) {
+      const state = getState();
+      const task = state.tasks.find(t => t.id === taskId);
+      const name = task ? task.name : taskId;
+      state.tasks = state.tasks.filter(t => t.id !== taskId);
+      addAuditLog('DELETE_TASK', taskId, `Deleted task "${name}"`);
+      saveState(state);
+    };
+
+    window.openAddTaskModal = function() {
+      const name = prompt('Enter Task Name:') || '';
+      if (!name.trim()) return;
+      const reward = prompt('Enter Reward (₹):', '25') || '25';
+      const link = prompt('Enter Task Link:', 'https://t.me/luckyuserbonus') || 'https://t.me/luckyuserbonus';
+      const state = getState();
+      state.tasks = state.tasks || [];
+      state.tasks.unshift({
+        id: 'TSK_' + Date.now(),
+        name: name.trim(),
+        logo: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100&auto=format&fit=crop&q=60',
+        reward: Number(reward) || 25,
+        description: 'Complete task steps to earn instant reward.',
+        rules: ['One submission per user'],
+        conditions: ['Valid account'],
+        steps: ['Open link', 'Complete steps', 'Upload proof'],
+        taskLink: link.trim(),
+        category: 'General',
+        status: 'active',
+        approvalMode: 'manual',
+        isReferralEligible: true,
+        createdAt: new Date().toISOString()
+      });
+      addAuditLog('CREATE_TASK', name, `Created task with reward ₹${reward}`);
+      saveState(state);
+    };
+
+    window.approveSub = function(subId) {
+      const state = getState();
+      const sub = state.submissions.find(s => s.id === subId);
+      if (!sub || sub.status === 'approved') return;
+
+      sub.status = 'approved';
+      sub.reviewedAt = new Date().toISOString();
+      sub.reviewedBy = '8471835378';
+
+      const wallet = state.wallets[sub.uid];
+      if (wallet) {
+        wallet.balance += sub.taskReward;
+        wallet.totalEarned += sub.taskReward;
+        wallet.completedTaskCount += 1;
+        state.transactions.unshift({
+          id: 'TXN_' + Date.now(),
+          uid: sub.uid,
+          amount: sub.taskReward,
+          type: 'credit',
+          category: 'task_reward',
+          description: `Task reward for "${sub.taskName}" approved by Admin`,
+          createdAt: new Date().toISOString(),
+          adminId: '8471835378'
+        });
+      }
+
+      addAuditLog('APPROVE_SUBMISSION', sub.id, `Approved submission and credited ₹${sub.taskReward} to ${sub.uid}`);
+      saveState(state);
+    };
+
+    window.rejectSub = function(subId) {
+      const reason = prompt('Enter rejection reason:') || 'Proof verification failed';
+      const state = getState();
+      const sub = state.submissions.find(s => s.id === subId);
+      if (!sub) return;
+
+      sub.status = 'rejected';
+      sub.rejectionReason = reason;
+      addAuditLog('REJECT_SUBMISSION', sub.id, `Rejected: ${reason}`);
+      saveState(state);
+    };
+
+    window.completeWithdraw = function(wId) {
+      const state = getState();
+      const w = state.withdrawals.find(x => x.id === wId);
+      if (!w) return;
+      w.status = 'completed';
+      addAuditLog('WITHDRAWAL_COMPLETED', w.id, `Payout ₹${w.amount} transferred to ${w.uid}`);
+      saveState(state);
+    };
+
+    window.rejectWithdraw = function(wId) {
+      const reason = prompt('Enter rejection reason:') || 'Bank account invalid';
+      const state = getState();
+      const w = state.withdrawals.find(x => x.id === wId);
+      if (!w || w.status === 'rejected') return;
+
+      w.status = 'rejected';
+      w.rejectionReason = reason;
+
+      const wallet = state.wallets[w.uid];
+      if (wallet) {
+        wallet.balance += w.amount;
+        state.transactions.unshift({
+          id: 'TXN_' + Date.now(),
+          uid: w.uid,
+          amount: w.amount,
+          type: 'credit',
+          category: 'withdrawal_refund',
+          description: `Refund for rejected withdrawal #${w.id}: ${reason}`,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      addAuditLog('WITHDRAWAL_REJECTED', w.id, `Rejected and refunded ₹${w.amount} to user ${w.uid}`);
+      saveState(state);
+    };
+
+    // Initialize
+    renderAdmin();
+  </script>
+</body>
+</html>
