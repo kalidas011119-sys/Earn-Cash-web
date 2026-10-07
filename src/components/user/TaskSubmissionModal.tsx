@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { dbService } from '../../services/db';
+import { compressImage } from '../../utils/imageCompressor';
 import { X, ExternalLink, CheckCircle2, AlertCircle, Clock, Upload, ArrowRight, ShieldCheck, Zap } from 'lucide-react';
 
 export const TaskSubmissionModal: React.FC = () => {
@@ -9,6 +10,7 @@ export const TaskSubmissionModal: React.FC = () => {
   const [contact, setContact] = useState('');
   const [proofImage, setProofImage] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [compressing, setCompressing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submittedStatus, setSubmittedStatus] = useState<string>('pending');
 
@@ -34,19 +36,24 @@ export const TaskSubmissionModal: React.FC = () => {
     setStep('form');
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        setError('Image size exceeds 5MB limit');
+      if (file.size > 15 * 1024 * 1024) {
+        setError('Image file is too large (max 15MB)');
         return;
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProofImage(reader.result as string);
+      try {
+        setCompressing(true);
         setError(null);
-      };
-      reader.readAsDataURL(file);
+        // Compress mobile screenshot to lightweight ~30KB web-ready data URL
+        const optimized = await compressImage(file, 800, 0.65);
+        setProofImage(optimized);
+      } catch (err: any) {
+        setError(err.message || 'Failed to process screenshot image');
+      } finally {
+        setCompressing(false);
+      }
     }
   };
 
@@ -56,7 +63,7 @@ export const TaskSubmissionModal: React.FC = () => {
     setError(null);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
     setError(null);
@@ -68,22 +75,27 @@ export const TaskSubmissionModal: React.FC = () => {
       return;
     }
 
-    const res = dbService.submitTask({
-      taskId: task.id,
-      uid: currentUser.uid,
-      phoneOrEmail: contact.trim() || currentUser.phone,
-      proofImageUrl: proofImage
-    });
+    try {
+      const res = await dbService.submitTask({
+        taskId: task.id,
+        uid: currentUser.uid,
+        phoneOrEmail: contact.trim() || currentUser.phone,
+        proofImageUrl: proofImage
+      });
 
-    if (!res.success) {
-      setError(res.error || 'Failed to submit proof');
+      if (!res.success) {
+        setError(res.error || 'Failed to submit proof');
+        setLoading(false);
+        return;
+      }
+
+      setSubmittedStatus(res.submission?.status || 'pending');
+      setStep('success');
+    } catch (err: any) {
+      setError(err.message || 'Submission failed');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setSubmittedStatus(res.submission?.status || 'pending');
-    setStep('success');
-    setLoading(false);
   };
 
   return (
@@ -302,9 +314,15 @@ export const TaskSubmissionModal: React.FC = () => {
                     type="file"
                     accept="image/*"
                     onChange={handleImageUpload}
+                    disabled={compressing || loading}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   />
-                  {proofImage ? (
+                  {compressing ? (
+                    <div className="py-4 text-emerald-600 font-bold text-xs flex flex-col items-center gap-1.5 animate-pulse">
+                      <Clock className="w-6 h-6 animate-spin" />
+                      <span>Optimizing screenshot for fast upload...</span>
+                    </div>
+                  ) : proofImage ? (
                     <div className="space-y-2">
                       <img
                         src={proofImage}
@@ -312,14 +330,14 @@ export const TaskSubmissionModal: React.FC = () => {
                         className="max-h-40 mx-auto rounded-lg shadow-sm border border-slate-200 object-contain"
                       />
                       <p className="text-[11px] text-emerald-600 font-semibold">
-                        Image ready. Click to change.
+                        ✓ Image optimized & ready. Click to change.
                       </p>
                     </div>
                   ) : (
                     <div className="py-3 text-slate-500">
                       <Upload className="w-8 h-8 mx-auto mb-1 text-slate-400" />
                       <p className="text-xs font-semibold text-slate-700">Click to upload screenshot</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">PNG, JPG up to 5MB</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Mobile screenshot / camera proof</p>
                     </div>
                   )}
                 </div>
@@ -335,10 +353,10 @@ export const TaskSubmissionModal: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || compressing}
                   className="flex-1 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg disabled:opacity-50 cursor-pointer"
                 >
-                  {loading ? 'Submitting...' : 'Submit Proof for Reward'}
+                  {loading ? 'Submitting...' : compressing ? 'Optimizing...' : 'Submit Proof for Reward'}
                 </button>
               </div>
             </form>

@@ -14,7 +14,7 @@ import {
   BankDetails
 } from '../types';
 import { db, rtdb } from './firebase';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, collection } from 'firebase/firestore';
 import { ref as dbRef, set as rtdbSet, onValue, get as rtdbGet } from 'firebase/database';
 
 const STORAGE_KEY = 'earncash_db_state_v1';
@@ -448,20 +448,40 @@ class DatabaseService {
     try {
       do {
         this.syncQueue = false;
+
+        // In main_state document, store lightweight submissions metadata to guarantee
+        // the 1MB Firestore limit is NEVER breached, while full proofs are stored in collection earncash_submissions
+        const sanitizedSubmissions = (this.state.submissions || []).slice(0, 100).map((sub) => ({
+          id: sub.id,
+          taskId: sub.taskId,
+          taskName: sub.taskName,
+          taskReward: sub.taskReward,
+          uid: sub.uid,
+          phoneOrEmail: sub.phoneOrEmail,
+          status: sub.status,
+          submittedAt: sub.submittedAt,
+          reviewedAt: sub.reviewedAt,
+          reviewedBy: sub.reviewedBy,
+          rejectionReason: sub.rejectionReason,
+          proofImageUrl: sub.proofImageUrl && sub.proofImageUrl.length > 50000
+            ? sub.proofImageUrl.slice(0, 50000)
+            : sub.proofImageUrl
+        }));
+
         const payload = {
           isInitialized: true,
           users: this.state.users || {},
           wallets: this.state.wallets || {},
-          transactions: this.state.transactions || [],
+          transactions: (this.state.transactions || []).slice(0, 300),
           tasks: this.state.tasks || [],
-          taskStarts: this.state.taskStarts || [],
-          submissions: this.state.submissions || [],
+          taskStarts: (this.state.taskStarts || []).slice(0, 200),
+          submissions: sanitizedSubmissions,
           referrals: this.state.referrals || [],
-          withdrawals: this.state.withdrawals || [],
+          withdrawals: (this.state.withdrawals || []).slice(0, 100),
           banners: this.state.banners || [],
           notifications: this.state.notifications || [],
           settings: this.state.settings || DEFAULT_SETTINGS,
-          auditLogs: this.state.auditLogs || [],
+          auditLogs: (this.state.auditLogs || []).slice(0, 100),
           lastUpdated: new Date().toISOString()
         };
 
@@ -500,7 +520,7 @@ class DatabaseService {
           await this.syncToFirebase();
         }
 
-        // Real-time listener for any updates from Admin Panel or User Panel across any browser/device
+        // Real-time listener for main state updates
         onSnapshot(firestoreRef, (snapshot) => {
           if (snapshot.exists()) {
             const data = snapshot.data();
@@ -510,6 +530,41 @@ class DatabaseService {
           }
         }, (err) => {
           console.warn('Firestore onSnapshot listener notice:', err);
+        });
+
+        // Real-time listener for dedicated individual submissions collection
+        const subsColRef = collection(db, 'earncash_submissions');
+        onSnapshot(subsColRef, (snapshot) => {
+          let updated = false;
+          snapshot.docs.forEach((d) => {
+            const data = d.data() as TaskSubmission;
+            if (data && data.id) {
+              const existingIdx = this.state.submissions.findIndex((s) => s.id === data.id);
+              if (existingIdx !== -1) {
+                if (
+                  this.state.submissions[existingIdx].status !== data.status ||
+                  this.state.submissions[existingIdx].reviewedAt !== data.reviewedAt ||
+                  (data.proofImageUrl && !this.state.submissions[existingIdx].proofImageUrl)
+                ) {
+                  this.state.submissions[existingIdx] = data;
+                  updated = true;
+                }
+              } else {
+                this.state.submissions.unshift(data);
+                updated = true;
+              }
+            }
+          });
+          if (updated) {
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+              } catch (e) {}
+            }
+            this.notify();
+          }
+        }, (err) => {
+          console.warn('Firestore submissions listener notice:', err);
         });
       } catch (e) {
         console.warn('Firestore initial sync notice:', e);
@@ -536,6 +591,40 @@ class DatabaseService {
           }
         }, (err) => {
           console.warn('RTDB onValue notice:', err);
+        });
+
+        const rtdbSubsRef = dbRef(rtdb, 'earncash_submissions');
+        onValue(rtdbSubsRef, (snap) => {
+          if (snap.exists()) {
+            const val = snap.val();
+            if (val && typeof val === 'object') {
+              let updated = false;
+              Object.values(val).forEach((item: any) => {
+                if (item && item.id) {
+                  const existingIdx = this.state.submissions.findIndex((s) => s.id === item.id);
+                  if (existingIdx !== -1) {
+                    if (this.state.submissions[existingIdx].status !== item.status) {
+                      this.state.submissions[existingIdx] = item;
+                      updated = true;
+                    }
+                  } else {
+                    this.state.submissions.unshift(item);
+                    updated = true;
+                  }
+                }
+              });
+              if (updated) {
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+                  } catch (e) {}
+                }
+                this.notify();
+              }
+            }
+          }
+        }, (err) => {
+          console.warn('RTDB submissions listener notice:', err);
         });
       } catch (e) {
         console.warn('RTDB sync notice:', e);
@@ -763,7 +852,7 @@ class DatabaseService {
     return { success: true, taskStart: start };
   }
 
-  public submitTask(data: { taskId: string; uid: string; phoneOrEmail: string; proofImageUrl: string }): { success: boolean; submission?: TaskSubmission; error?: string } {
+  public async submitTask(data: { taskId: string; uid: string; phoneOrEmail: string; proofImageUrl: string }): Promise<{ success: boolean; submission?: TaskSubmission; error?: string }> {
     const task = this.state.tasks.find((t) => t.id === data.taskId);
     if (!task) return { success: false, error: 'Task not found' };
 
@@ -804,12 +893,31 @@ class DatabaseService {
       this.processTaskReward(data.uid, task.id, task.name, task.reward, task.isReferralEligible, 'AUTO_SYSTEM');
     }
 
+    // Direct write to dedicated Firestore collection 'earncash_submissions'
+    if (db) {
+      try {
+        await setDoc(doc(db, 'earncash_submissions', submission.id), submission);
+      } catch (err) {
+        console.warn('Direct submission Firestore write error:', err);
+      }
+    }
+
+    // Direct write to RTDB
+    if (rtdb) {
+      try {
+        await rtdbSet(dbRef(rtdb, 'earncash_submissions/' + submission.id), submission);
+      } catch (err) {
+        console.warn('Direct submission RTDB write error:', err);
+      }
+    }
+
     this.saveState();
+    this.notify();
     return { success: true, submission };
   }
 
   // --- TASK APPROVAL (Internal/Admin) ---
-  public approveSubmission(submissionId: string, adminId: string): { success: boolean; error?: string } {
+  public async approveSubmission(submissionId: string, adminId: string): Promise<{ success: boolean; error?: string }> {
     const sub = this.state.submissions.find((s) => s.id === submissionId);
     if (!sub) return { success: false, error: 'Submission not found' };
     if (sub.status === 'approved' || sub.status === 'completed') {
@@ -825,13 +933,30 @@ class DatabaseService {
     sub.reviewedBy = adminId;
 
     this.processTaskReward(sub.uid, sub.taskId, sub.taskName, reward, isReferralEligible, adminId);
-
     this.addAuditLog(adminId, 'APPROVE_TASK_SUBMISSION', sub.id, `Approved submission for user ${sub.uid}, credited ₹${reward}`);
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'earncash_submissions', sub.id), sub);
+      } catch (e) {
+        console.warn('Firestore sub approve error:', e);
+      }
+    }
+
+    if (rtdb) {
+      try {
+        await rtdbSet(dbRef(rtdb, 'earncash_submissions/' + sub.id), sub);
+      } catch (e) {
+        console.warn('RTDB sub approve error:', e);
+      }
+    }
+
     this.saveState();
+    this.notify();
     return { success: true };
   }
 
-  public rejectSubmission(submissionId: string, reason: string, adminId: string): { success: boolean; error?: string } {
+  public async rejectSubmission(submissionId: string, reason: string, adminId: string): Promise<{ success: boolean; error?: string }> {
     const sub = this.state.submissions.find((s) => s.id === submissionId);
     if (!sub) return { success: false, error: 'Submission not found' };
     if (sub.status === 'approved' || sub.status === 'completed') {
@@ -844,13 +969,41 @@ class DatabaseService {
     sub.reviewedBy = adminId;
 
     this.addAuditLog(adminId, 'REJECT_TASK_SUBMISSION', sub.id, `Rejected submission: ${sub.rejectionReason}`);
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'earncash_submissions', sub.id), sub);
+      } catch (e) {
+        console.warn('Firestore sub reject error:', e);
+      }
+    }
+
+    if (rtdb) {
+      try {
+        await rtdbSet(dbRef(rtdb, 'earncash_submissions/' + sub.id), sub);
+      } catch (e) {
+        console.warn('RTDB sub reject error:', e);
+      }
+    }
+
     this.saveState();
+    this.notify();
     return { success: true };
   }
 
   private processTaskReward(uid: string, taskId: string, taskName: string, reward: number, isReferralEligible: boolean, approverId: string) {
-    const wallet = this.state.wallets[uid];
-    if (!wallet) return;
+    let wallet = this.state.wallets[uid];
+    if (!wallet) {
+      wallet = {
+        uid,
+        balance: 0,
+        totalEarned: 0,
+        referralEarnings: 0,
+        completedTaskCount: 0,
+        lastUpdated: new Date().toISOString()
+      };
+      this.state.wallets[uid] = wallet;
+    }
 
     // Check duplicate transaction for this task
     const alreadyCredited = this.state.transactions.find((tx) => tx.uid === uid && tx.category === 'task_reward' && tx.referenceId === taskId);

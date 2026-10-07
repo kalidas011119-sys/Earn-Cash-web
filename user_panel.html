@@ -173,6 +173,14 @@
       }
     };
 
+    window.submitSubmissionToFirebase = async function(sub) {
+      try {
+        await setDoc(doc(firestore, "earncash_submissions", sub.id), sub);
+      } catch (err) {
+        console.warn("Direct submission write error:", err);
+      }
+    };
+
     // Initial fetch and real-time listener to load and sync tasks across all devices
     const docRef = doc(firestore, "earncash_data", "main_state");
     getDoc(docRef).then((snap) => {
@@ -870,6 +878,9 @@
         }
       }
 
+      if (window.submitSubmissionToFirebase) {
+        window.submitSubmissionToFirebase(sub);
+      }
       saveState(state);
       closeTaskModal();
       alert(isAuto ? `Reward ₹${selectedTask.reward} added instantly!` : 'Proof submitted for Admin review.');

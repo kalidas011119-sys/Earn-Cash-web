@@ -18,7 +18,7 @@
   <!-- Firebase SDK ESM script -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCZs9L6W06MtOytPRxGnC3GbCVezcZpZ_8",
@@ -39,6 +39,14 @@
         await setDoc(doc(firestore, "earncash_data", "main_state"), { ...state, isInitialized: true });
       } catch (err) {
         console.warn("Firebase sync write error:", err);
+      }
+    };
+
+    window.updateSubmissionInFirebase = async function(sub) {
+      try {
+        await setDoc(doc(firestore, "earncash_submissions", sub.id), sub, { merge: true });
+      } catch (err) {
+        console.warn("Direct submission update error:", err);
       }
     };
 
@@ -63,6 +71,29 @@
         }
       }
     }, (err) => console.warn("Firestore listener error:", err));
+
+    // Listen to real-time user proof submissions
+    onSnapshot(collection(firestore, "earncash_submissions"), (snap) => {
+      const state = getState();
+      state.submissions = state.submissions || [];
+      let updated = false;
+      snap.docs.forEach((d) => {
+        const item = d.data();
+        if (item && item.id) {
+          const idx = state.submissions.findIndex(s => s.id === item.id);
+          if (idx !== -1) {
+            state.submissions[idx] = item;
+          } else {
+            state.submissions.unshift(item);
+          }
+          updated = true;
+        }
+      });
+      if (updated) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        if (window.renderAdmin) window.renderAdmin();
+      }
+    }, (err) => console.warn("Submissions listener error:", err));
   </script>
 
   <!-- Admin Panel Application Logic -->
@@ -473,6 +504,9 @@
       }
 
       addAuditLog(state, 'APPROVE_SUBMISSION', sub.id, `Approved submission and credited ₹${sub.taskReward} to ${sub.uid}`);
+      if (window.updateSubmissionInFirebase) {
+        window.updateSubmissionInFirebase(sub);
+      }
       saveState(state);
       renderAdmin();
     };
@@ -486,6 +520,9 @@
       sub.status = 'rejected';
       sub.rejectionReason = reason;
       addAuditLog(state, 'REJECT_SUBMISSION', sub.id, `Rejected: ${reason}`);
+      if (window.updateSubmissionInFirebase) {
+        window.updateSubmissionInFirebase(sub);
+      }
       saveState(state);
       renderAdmin();
     };

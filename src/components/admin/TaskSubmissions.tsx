@@ -24,6 +24,7 @@ export const TaskSubmissions: React.FC = () => {
     sub: null
   });
   const [rejectReason, setRejectReason] = useState<string>('');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const filtered = state.submissions.filter((sub) => {
     if (filterStatus !== 'all' && sub.status !== filterStatus) return false;
@@ -39,24 +40,34 @@ export const TaskSubmissions: React.FC = () => {
     return true;
   });
 
-  const handleApprove = (subId: string) => {
-    const res = dbService.approveSubmission(subId, 'ADMIN_8471835378');
-    if (!res.success) {
-      alert(res.error || 'Failed to approve');
+  const handleApprove = async (subId: string) => {
+    try {
+      setActionLoading(subId);
+      const res = await dbService.approveSubmission(subId, 'ADMIN_8471835378');
+      if (!res.success) {
+        alert(res.error || 'Failed to approve');
+      }
+    } finally {
+      setActionLoading(null);
     }
   };
 
-  const handleRejectSubmit = (e: React.FormEvent) => {
+  const handleRejectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rejectModal.sub) return;
 
-    dbService.rejectSubmission(
-      rejectModal.sub.id,
-      rejectReason.trim() || 'Proof image did not match task requirements',
-      'ADMIN_8471835378'
-    );
-    setRejectModal({ isOpen: false, sub: null });
-    setRejectReason('');
+    try {
+      setActionLoading(rejectModal.sub.id);
+      await dbService.rejectSubmission(
+        rejectModal.sub.id,
+        rejectReason.trim() || 'Proof image did not match task requirements',
+        'ADMIN_8471835378'
+      );
+      setRejectModal({ isOpen: false, sub: null });
+      setRejectReason('');
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   return (
