@@ -227,12 +227,22 @@ export const HomeScreen: React.FC = () => {
         </div>
 
         {availableTasks.length === 0 ? (
-          <div className="p-6 text-center bg-white rounded-2xl border border-slate-100">
-            <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
+          <div className="p-6 text-center bg-white rounded-2xl border border-slate-100 space-y-2">
+            <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
             <p className="text-xs font-bold text-slate-700">All available tasks completed!</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Check back soon as admin uploads new high-reward tasks.
+            <p className="text-[11px] text-slate-400">
+              Tap below to automatically generate new daily bonus earning tasks.
             </p>
+            <button
+              type="button"
+              onClick={() => {
+                dbService.autoReplenishTasks('DAILY_AUTO_SYSTEM');
+                setActiveUserTab('earn');
+              }}
+              className="mt-1 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl text-xs font-bold shadow hover:opacity-95 cursor-pointer active:scale-95 transition"
+            >
+              ⚡ Auto-Add Fresh Daily Tasks
+            </button>
           </div>
         ) : (
           <div className="space-y-2.5">

@@ -636,10 +636,34 @@ class DatabaseService {
     if (!remoteData) return;
     this.hasLoadedRemote = true;
 
+    // Merge submissions by id so no user submission is ever dropped
+    const subMap = new Map<string, TaskSubmission>();
+    (this.state.submissions || []).forEach((s) => {
+      if (s && s.id) subMap.set(s.id, s);
+    });
+    if (Array.isArray(remoteData.submissions)) {
+      remoteData.submissions.forEach((s: TaskSubmission) => {
+        if (s && s.id) {
+          const local = subMap.get(s.id);
+          if (!local) {
+            subMap.set(s.id, s);
+          } else {
+            // Keep proof image if local has it
+            subMap.set(s.id, {
+              ...s,
+              proofImageUrl: local.proofImageUrl || s.proofImageUrl
+            });
+          }
+        }
+      });
+    }
+    const newSubmissions = Array.from(subMap.values()).sort(
+      (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+    );
+
     const newTasks = Array.isArray(remoteData.tasks) ? remoteData.tasks : this.state.tasks;
     const newBanners = Array.isArray(remoteData.banners) ? remoteData.banners : this.state.banners;
     const newNotifications = Array.isArray(remoteData.notifications) ? remoteData.notifications : this.state.notifications;
-    const newSubmissions = Array.isArray(remoteData.submissions) ? remoteData.submissions : this.state.submissions;
     const newWithdrawals = Array.isArray(remoteData.withdrawals) ? remoteData.withdrawals : this.state.withdrawals;
     const newReferrals = Array.isArray(remoteData.referrals) ? remoteData.referrals : this.state.referrals;
     const newTransactions = Array.isArray(remoteData.transactions) ? remoteData.transactions : this.state.transactions;
@@ -1263,6 +1287,82 @@ class DatabaseService {
     this.addAuditLog(adminId, 'DELETE_TASK', taskId, `Deleted task ${taskId}`);
     this.saveState();
     return { success: true };
+  }
+
+  public autoReplenishTasks(adminId = 'SYSTEM'): { success: boolean; count: number } {
+    const templates: Partial<Task>[] = [
+      {
+        name: 'Daily Telegram Reward Claim',
+        category: 'Telegram',
+        reward: 25,
+        description: 'Join daily sponsor channel, tap claim bonus button, and receive your instant wallet credit.',
+        taskLink: 'https://t.me/luckyuserbonus',
+        logo: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100&auto=format&fit=crop&q=60',
+        approvalMode: 'automatic',
+        isReferralEligible: true,
+        steps: ['Open Telegram channel link', 'Subscribe & click start bot', 'Submit proof to claim instant reward']
+      },
+      {
+        name: 'Watch 30s Partner Video',
+        category: 'Video',
+        reward: 15,
+        description: 'Watch short video advertisement to the end and get automatic credit to your wallet.',
+        taskLink: 'https://t.me/luckyuserbonus',
+        logo: 'https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=100&auto=format&fit=crop&q=60',
+        approvalMode: 'automatic',
+        isReferralEligible: true,
+        steps: ['Open partner link', 'Watch full video', 'Upload completion screenshot']
+      },
+      {
+        name: 'Google Play Rating & Review',
+        category: 'App Review',
+        reward: 35,
+        description: 'Give a 5-star rating on Google Play Store, write helpful review, and earn ₹35.',
+        taskLink: 'https://t.me/luckyuserbonus',
+        logo: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=100&auto=format&fit=crop&q=60',
+        approvalMode: 'manual',
+        isReferralEligible: true,
+        steps: ['Open rating link', 'Rate 5 stars and post short feedback', 'Screenshot your posted review']
+      },
+      {
+        name: 'Instagram Follow & Share',
+        category: 'Social Media',
+        reward: 20,
+        description: 'Follow our official partner page on Instagram and share post on your story.',
+        taskLink: 'https://t.me/luckyuserbonus',
+        logo: 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=100&auto=format&fit=crop&q=60',
+        approvalMode: 'automatic',
+        isReferralEligible: true,
+        steps: ['Follow account', 'Like recent post', 'Take screenshot of following status']
+      }
+    ];
+
+    let count = 0;
+    templates.forEach((tmpl) => {
+      const exists = this.state.tasks.some((t) => t.name === tmpl.name);
+      if (!exists) {
+        this.saveTask(tmpl, adminId);
+        count++;
+      }
+    });
+
+    if (count === 0) {
+      const newBonus: Partial<Task> = {
+        name: `Daily Bonus Quest #${this.state.tasks.length + 1}`,
+        category: 'Daily Quest',
+        reward: 25,
+        description: 'Complete daily quest tasks to unlock special wallet bonuses.',
+        taskLink: 'https://t.me/luckyuserbonus',
+        logo: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=100&auto=format&fit=crop&q=60',
+        approvalMode: 'automatic',
+        isReferralEligible: true,
+        steps: ['Open quest link', 'Follow instructions', 'Submit screenshot']
+      };
+      this.saveTask(newBonus, adminId);
+      count = 1;
+    }
+
+    return { success: true, count };
   }
 
   // Banner CRUD

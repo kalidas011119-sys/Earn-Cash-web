@@ -124,13 +124,28 @@ export const TaskManagement: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={openAddModal}
-          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold rounded-xl text-xs shadow-lg hover:opacity-95 transition cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add New Task</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              const res = dbService.autoReplenishTasks('ADMIN_8471835378');
+              setDeleteNotice(`⚡ ${res.count} fresh daily tasks generated successfully!`);
+              setTimeout(() => setDeleteNotice(null), 3500);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold rounded-xl text-xs border border-slate-700 transition cursor-pointer"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>Auto-Add Daily Tasks</span>
+          </button>
+
+          <button
+            onClick={openAddModal}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold rounded-xl text-xs shadow-lg hover:opacity-95 transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add New Task</span>
+          </button>
+        </div>
       </div>
 
       {deleteNotice && (

@@ -25,6 +25,8 @@ export const TaskSubmissions: React.FC = () => {
   });
   const [rejectReason, setRejectReason] = useState<string>('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [activeProofSub, setActiveProofSub] = useState<TaskSubmission | null>(null);
 
   const filtered = state.submissions.filter((sub) => {
     if (filterStatus !== 'all' && sub.status !== filterStatus) return false;
@@ -40,11 +42,18 @@ export const TaskSubmissions: React.FC = () => {
     return true;
   });
 
-  const handleApprove = async (subId: string) => {
+  const handleApprove = async (sub: TaskSubmission) => {
     try {
-      setActionLoading(subId);
-      const res = await dbService.approveSubmission(subId, 'ADMIN_8471835378');
-      if (!res.success) {
+      setActionLoading(sub.id);
+      const res = await dbService.approveSubmission(sub.id, 'ADMIN_8471835378');
+      if (res.success) {
+        setActionNotice(`Approved! ₹${sub.taskReward} credited to user ${sub.uid}'s wallet.`);
+        setTimeout(() => setActionNotice(null), 4000);
+        if (activeProofSub?.id === sub.id) {
+          setActiveProofSub(null);
+          setSelectedProof(null);
+        }
+      } else {
         alert(res.error || 'Failed to approve');
       }
     } finally {
@@ -58,13 +67,20 @@ export const TaskSubmissions: React.FC = () => {
 
     try {
       setActionLoading(rejectModal.sub.id);
+      const reason = rejectReason.trim() || 'Proof image did not match task requirements';
       await dbService.rejectSubmission(
         rejectModal.sub.id,
-        rejectReason.trim() || 'Proof image did not match task requirements',
+        reason,
         'ADMIN_8471835378'
       );
+      setActionNotice(`Submission for ${rejectModal.sub.uid} rejected.`);
+      setTimeout(() => setActionNotice(null), 4000);
       setRejectModal({ isOpen: false, sub: null });
       setRejectReason('');
+      if (activeProofSub?.id === rejectModal.sub.id) {
+        setActiveProofSub(null);
+        setSelectedProof(null);
+      }
     } finally {
       setActionLoading(null);
     }
@@ -72,8 +88,21 @@ export const TaskSubmissions: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Action Notice */}
+      {actionNotice && (
+        <div className="p-3.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded-2xl text-xs flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="font-bold">{actionNotice}</span>
+          </div>
+          <button onClick={() => setActionNotice(null)} className="text-slate-400 hover:text-white">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Header & Controls */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-black text-white">Task Submissions Review</h2>
           <p className="text-xs text-slate-400">
@@ -81,7 +110,19 @@ export const TaskSubmissions: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search box */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search UID, task, contact..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 w-44 sm:w-56"
+            />
+          </div>
+
           {/* Status filter tabs */}
           <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-xl text-xs">
             {['all', 'pending', 'approved', 'rejected'].map((st) => (
@@ -90,7 +131,7 @@ export const TaskSubmissions: React.FC = () => {
                 onClick={() => setFilterStatus(st)}
                 className={`px-3 py-1 rounded-lg capitalize transition font-bold ${
                   filterStatus === st
-                    ? 'bg-amber-500 text-slate-950'
+                    ? 'bg-amber-500 text-slate-950 shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -101,8 +142,117 @@ export const TaskSubmissions: React.FC = () => {
         </div>
       </div>
 
-      {/* Submissions Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+      {/* MOBILE CARD VIEW (Optimized for Phones & Tablets) */}
+      <div className="block lg:hidden space-y-3">
+        {filtered.length === 0 ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center text-slate-500 text-xs">
+            No submissions found for the selected filter.
+          </div>
+        ) : (
+          filtered.map((sub) => (
+            <div
+              key={sub.id}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-4 text-xs space-y-3 shadow-lg"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className="text-[10px] font-mono font-bold text-amber-400 block">{sub.id}</span>
+                  <h3 className="font-bold text-white text-sm line-clamp-1 mt-0.5">{sub.taskName}</h3>
+                  <div className="text-[11px] text-slate-400 mt-1 space-y-0.5">
+                    <p>User UID: <span className="text-white font-mono font-bold">{sub.uid}</span></p>
+                    <p>Contact: <span className="text-slate-300 font-medium">{sub.phoneOrEmail}</span></p>
+                    <p className="text-[10px] text-slate-500">{new Date(sub.submittedAt).toLocaleString()}</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize block ${
+                      sub.status === 'approved' || sub.status === 'completed'
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : sub.status === 'rejected'
+                        ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                        : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    }`}
+                  >
+                    {sub.status}
+                  </span>
+                  <span className="text-base font-black text-emerald-400 mt-1 block">
+                    +₹{sub.taskReward}
+                  </span>
+                </div>
+              </div>
+
+              {/* Proof Image Preview */}
+              {sub.proofImageUrl ? (
+                <div className="p-2.5 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <img
+                      src={sub.proofImageUrl}
+                      alt="Proof"
+                      className="w-12 h-12 object-cover rounded-xl border border-slate-700 bg-slate-800 shrink-0"
+                    />
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Attached Screenshot</span>
+                      <span className="text-xs font-semibold text-slate-200">Tap to inspect full-size</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveProofSub(sub);
+                      setSelectedProof(sub.proofImageUrl);
+                    }}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-xl text-xs font-bold border border-slate-700 transition"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>View Proof</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="p-2 bg-slate-950/60 rounded-xl text-[11px] text-slate-500 italic">
+                  No screenshot uploaded
+                </div>
+              )}
+
+              {/* Action Buttons for Mobile */}
+              <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
+                {sub.status === 'pending' ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={actionLoading === sub.id}
+                      onClick={() => handleApprove(sub)}
+                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/30 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Approve (+₹{sub.taskReward})</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={actionLoading === sub.id}
+                      onClick={() => setRejectModal({ isOpen: true, sub })}
+                      className="px-4 py-2.5 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-600/50 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+                    >
+                      <XCircle className="w-4 h-4" />
+                      <span>Reject</span>
+                    </button>
+                  </>
+                ) : (
+                  <div className="w-full text-center py-1 text-[11px] text-slate-500 font-medium">
+                    {sub.reviewedBy ? `Reviewed by ${sub.reviewedBy}` : 'Processed'}
+                    {sub.rejectionReason && (
+                      <span className="text-rose-400 block text-[10px] mt-0.5">Reason: {sub.rejectionReason}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* DESKTOP SUBMISSIONS TABLE */}
+      <div className="hidden lg:block bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-800/80 text-slate-400 font-bold uppercase tracking-wider text-[10px] border-b border-slate-700">
@@ -140,8 +290,12 @@ export const TaskSubmissions: React.FC = () => {
                     <td className="p-4">
                       {sub.proofImageUrl ? (
                         <button
-                          onClick={() => setSelectedProof(sub.proofImageUrl)}
-                          className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-200 transition"
+                          type="button"
+                          onClick={() => {
+                            setActiveProofSub(sub);
+                            setSelectedProof(sub.proofImageUrl);
+                          }}
+                          className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-200 transition cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5 text-amber-400" />
                           <span>View Proof</span>
@@ -170,15 +324,19 @@ export const TaskSubmissions: React.FC = () => {
                       {sub.status === 'pending' ? (
                         <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={() => handleApprove(sub.id)}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow transition cursor-pointer"
+                            type="button"
+                            disabled={actionLoading === sub.id}
+                            onClick={() => handleApprove(sub)}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow transition cursor-pointer active:scale-95 disabled:opacity-50"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>Approve (+₹{sub.taskReward})</span>
                           </button>
                           <button
+                            type="button"
+                            disabled={actionLoading === sub.id}
                             onClick={() => setRejectModal({ isOpen: true, sub })}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-600/50 rounded-lg font-bold text-xs transition cursor-pointer"
+                            className="flex items-center gap-1 px-3 py-1.5 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-600/50 rounded-lg font-bold text-xs transition cursor-pointer active:scale-95 disabled:opacity-50"
                           >
                             <XCircle className="w-3.5 h-3.5" />
                             <span>Reject</span>
@@ -201,29 +359,80 @@ export const TaskSubmissions: React.FC = () => {
       {/* Proof Image View Modal */}
       {selectedProof && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-lg w-full text-white space-y-3 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-lg w-full text-white space-y-3.5 shadow-2xl">
             <div className="flex justify-between items-center">
-              <h3 className="text-sm font-bold">Proof Screenshot Inspection</h3>
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-amber-400" />
+                  <span>Proof Screenshot Inspection</span>
+                </h3>
+                {activeProofSub && (
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    User: <span className="font-mono text-amber-400 font-bold">{activeProofSub.uid}</span> • Task: {activeProofSub.taskName}
+                  </p>
+                )}
+              </div>
               <button
-                onClick={() => setSelectedProof(null)}
-                className="text-slate-400 hover:text-white p-1"
+                type="button"
+                onClick={() => {
+                  setSelectedProof(null);
+                  setActiveProofSub(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="max-h-[70vh] overflow-auto rounded-2xl bg-black flex items-center justify-center p-2 border border-slate-800">
+            <div className="max-h-[60vh] overflow-auto rounded-2xl bg-black flex items-center justify-center p-2 border border-slate-800">
               <img
                 src={selectedProof}
                 alt="Proof"
                 className="max-h-full max-w-full object-contain rounded-xl"
               />
             </div>
-            <button
-              onClick={() => setSelectedProof(null)}
-              className="w-full py-2 bg-slate-800 text-white rounded-xl text-xs font-bold"
-            >
-              Close
-            </button>
+
+            {/* Direct action buttons right under image */}
+            {activeProofSub && activeProofSub.status === 'pending' ? (
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={actionLoading === activeProofSub.id}
+                  onClick={() => handleApprove(activeProofSub)}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/30 transition cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Approve & Credit (+₹{activeProofSub.taskReward})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRejectModal({ isOpen: true, sub: activeProofSub })}
+                  className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProof(null);
+                    setActiveProofSub(null);
+                  }}
+                  className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedProof(null);
+                  setActiveProofSub(null);
+                }}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold"
+              >
+                Close Viewer
+              </button>
+            )}
           </div>
         </div>
       )}
