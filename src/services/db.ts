@@ -335,6 +335,7 @@ class DatabaseService {
   private isSyncingWithFirebase = false;
   private syncQueue = false;
   private hasLoadedRemote = false;
+  private lastTaskModifiedAt = 0;
 
   constructor() {
     this.state = this.loadState();
@@ -365,15 +366,20 @@ class DatabaseService {
   private loadState(): AppState {
     if (typeof window === 'undefined') return this.createInitialState();
     try {
+      const rawMod = localStorage.getItem('earncash_tasks_last_modified');
+      if (rawMod) {
+        this.lastTaskModifiedAt = Number(rawMod) || 0;
+      }
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        // Ensure defaults exist
+        // Ensure defaults exist - preserve tasks array even if empty
+        const resolvedTasks = Array.isArray(parsed.tasks) ? parsed.tasks : INITIAL_TASKS;
         return {
           users: parsed.users || {},
           wallets: parsed.wallets || {},
           transactions: parsed.transactions || [],
-          tasks: Array.isArray(parsed.tasks) ? parsed.tasks : INITIAL_TASKS,
+          tasks: resolvedTasks,
           taskStarts: parsed.taskStarts || [],
           submissions: parsed.submissions || [],
           referrals: parsed.referrals || [],
@@ -430,6 +436,9 @@ class DatabaseService {
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+        if (this.lastTaskModifiedAt > 0) {
+          localStorage.setItem('earncash_tasks_last_modified', this.lastTaskModifiedAt.toString());
+        }
         this.channel?.postMessage({ type: 'STATE_UPDATED', timestamp: Date.now() });
       } catch (e) {
         console.error('Failed to save state to localStorage:', e);
@@ -437,6 +446,41 @@ class DatabaseService {
     }
     this.notify();
     this.syncToFirebase();
+  }
+
+  public async syncTasksToFirebase() {
+    this.hasLoadedRemote = true;
+    this.lastTaskModifiedAt = Date.now();
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('earncash_tasks_last_modified', this.lastTaskModifiedAt.toString());
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+      } catch (e) {}
+    }
+    const tasksPayload = {
+      tasks: this.state.tasks || [],
+      lastModified: this.lastTaskModifiedAt,
+      lastUpdated: new Date().toISOString()
+    };
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'earncash_data', 'tasks_list'), tasksPayload);
+        await setDoc(doc(db, 'earncash_data', 'main_state'), { tasks: this.state.tasks, lastModifiedTasks: this.lastTaskModifiedAt }, { merge: true });
+      } catch (e) {
+        console.warn('Firestore tasks sync error:', e);
+      }
+    }
+
+    if (rtdb) {
+      try {
+        await rtdbSet(dbRef(rtdb, 'earncash_tasks'), tasksPayload);
+        await rtdbSet(dbRef(rtdb, 'earncash_main_state/tasks'), this.state.tasks || []);
+      } catch (e) {
+        console.warn('RTDB tasks sync error:', e);
+      }
+    }
+    this.notify();
   }
 
   private async syncToFirebase() {
@@ -520,6 +564,32 @@ class DatabaseService {
           await this.syncToFirebase();
         }
 
+        // Real-time listener for dedicated tasks list
+        const tasksDocRef = doc(db, 'earncash_data', 'tasks_list');
+        onSnapshot(tasksDocRef, (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            if (data && Array.isArray(data.tasks)) {
+              const remoteMod = Number(data.lastModified) || 0;
+              if (remoteMod >= this.lastTaskModifiedAt || this.lastTaskModifiedAt === 0) {
+                this.lastTaskModifiedAt = remoteMod;
+                this.state.tasks = data.tasks;
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+                    if (remoteMod > 0) {
+                      localStorage.setItem('earncash_tasks_last_modified', remoteMod.toString());
+                    }
+                  } catch (e) {}
+                }
+                this.notify();
+              }
+            }
+          }
+        }, (err) => {
+          console.warn('Firestore tasks_list listener notice:', err);
+        });
+
         // Real-time listener for main state updates
         onSnapshot(firestoreRef, (snapshot) => {
           if (snapshot.exists()) {
@@ -566,6 +636,32 @@ class DatabaseService {
         }, (err) => {
           console.warn('Firestore submissions listener notice:', err);
         });
+
+        // Real-time listener for dedicated individual user wallets collection
+        const walletsColRef = collection(db, 'earncash_wallets');
+        onSnapshot(walletsColRef, (snapshot) => {
+          let updated = false;
+          snapshot.docs.forEach((d) => {
+            const w = d.data() as Wallet;
+            if (w && w.uid) {
+              const localWallet = this.state.wallets[w.uid];
+              if (!localWallet || localWallet.balance !== w.balance || localWallet.totalEarned !== w.totalEarned) {
+                this.state.wallets[w.uid] = { ...localWallet, ...w };
+                updated = true;
+              }
+            }
+          });
+          if (updated) {
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+              } catch (e) {}
+            }
+            this.notify();
+          }
+        }, (err) => {
+          console.warn('Firestore earncash_wallets listener notice:', err);
+        });
       } catch (e) {
         console.warn('Firestore initial sync notice:', e);
       }
@@ -591,6 +687,32 @@ class DatabaseService {
           }
         }, (err) => {
           console.warn('RTDB onValue notice:', err);
+        });
+
+        // Dedicated RTDB tasks listener
+        const rtdbTasksRef = dbRef(rtdb, 'earncash_tasks');
+        onValue(rtdbTasksRef, (snap) => {
+          if (snap.exists()) {
+            const val = snap.val();
+            if (val && Array.isArray(val.tasks)) {
+              const remoteMod = Number(val.lastModified) || 0;
+              if (remoteMod >= this.lastTaskModifiedAt || this.lastTaskModifiedAt === 0) {
+                this.lastTaskModifiedAt = remoteMod;
+                this.state.tasks = val.tasks;
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+                    if (remoteMod > 0) {
+                      localStorage.setItem('earncash_tasks_last_modified', remoteMod.toString());
+                    }
+                  } catch (e) {}
+                }
+                this.notify();
+              }
+            }
+          }
+        }, (err) => {
+          console.warn('RTDB earncash_tasks notice:', err);
         });
 
         const rtdbSubsRef = dbRef(rtdb, 'earncash_submissions');
@@ -661,7 +783,14 @@ class DatabaseService {
       (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
     );
 
-    const newTasks = Array.isArray(remoteData.tasks) ? remoteData.tasks : this.state.tasks;
+    let newTasks = this.state.tasks;
+    if (Array.isArray(remoteData.tasks)) {
+      const remoteMod = Number(remoteData.lastModifiedTasks || remoteData.lastModified) || 0;
+      if (remoteMod >= this.lastTaskModifiedAt || this.lastTaskModifiedAt === 0) {
+        newTasks = remoteData.tasks;
+        if (remoteMod > 0) this.lastTaskModifiedAt = remoteMod;
+      }
+    }
     const newBanners = Array.isArray(remoteData.banners) ? remoteData.banners : this.state.banners;
     const newNotifications = Array.isArray(remoteData.notifications) ? remoteData.notifications : this.state.notifications;
     const newWithdrawals = Array.isArray(remoteData.withdrawals) ? remoteData.withdrawals : this.state.withdrawals;
@@ -670,7 +799,34 @@ class DatabaseService {
     const newAuditLogs = Array.isArray(remoteData.auditLogs) ? remoteData.auditLogs : this.state.auditLogs;
     const newSettings = remoteData.settings ? { ...DEFAULT_SETTINGS, ...remoteData.settings } : this.state.settings;
     const newUsers = remoteData.users ? { ...this.state.users, ...remoteData.users } : this.state.users;
-    const newWallets = remoteData.wallets ? { ...this.state.wallets, ...remoteData.wallets } : this.state.wallets;
+    
+    // Safely merge wallets by UID so newer or higher balance is never downgraded
+    const newWallets = { ...this.state.wallets };
+    if (remoteData.wallets && typeof remoteData.wallets === 'object') {
+      Object.entries(remoteData.wallets).forEach(([uid, rW]: [string, any]) => {
+        if (!rW || typeof rW !== 'object') return;
+        const lW = newWallets[uid];
+        if (!lW) {
+          newWallets[uid] = rW;
+        } else {
+          const rTime = new Date(rW.lastUpdated || 0).getTime();
+          const lTime = new Date(lW.lastUpdated || 0).getTime();
+          if (rTime > lTime) {
+            newWallets[uid] = { ...lW, ...rW };
+          } else if (rTime < lTime) {
+            newWallets[uid] = { ...rW, ...lW };
+          } else {
+            newWallets[uid] = {
+              ...lW,
+              ...rW,
+              balance: Math.max(Number(lW.balance) || 0, Number(rW.balance) || 0),
+              totalEarned: Math.max(Number(lW.totalEarned) || 0, Number(rW.totalEarned) || 0),
+              completedTaskCount: Math.max(Number(lW.completedTaskCount) || 0, Number(rW.completedTaskCount) || 0)
+            };
+          }
+        }
+      });
+    }
 
     this.state = {
       users: newUsers,
@@ -956,12 +1112,20 @@ class DatabaseService {
     sub.reviewedAt = new Date().toISOString();
     sub.reviewedBy = adminId;
 
-    this.processTaskReward(sub.uid, sub.taskId, sub.taskName, reward, isReferralEligible, adminId);
+    this.processTaskReward(sub.uid, sub.taskId, sub.taskName, reward, isReferralEligible, adminId, sub.id);
     this.addAuditLog(adminId, 'APPROVE_TASK_SUBMISSION', sub.id, `Approved submission for user ${sub.uid}, credited ₹${reward}`);
+
+    const updatedWallet = this.state.wallets[sub.uid];
 
     if (db) {
       try {
         await setDoc(doc(db, 'earncash_submissions', sub.id), sub);
+        if (updatedWallet) {
+          await setDoc(doc(db, 'earncash_wallets', sub.uid), updatedWallet, { merge: true });
+          await setDoc(doc(db, 'earncash_data', 'main_state'), {
+            wallets: { [sub.uid]: updatedWallet }
+          }, { merge: true });
+        }
       } catch (e) {
         console.warn('Firestore sub approve error:', e);
       }
@@ -970,6 +1134,10 @@ class DatabaseService {
     if (rtdb) {
       try {
         await rtdbSet(dbRef(rtdb, 'earncash_submissions/' + sub.id), sub);
+        if (updatedWallet) {
+          await rtdbSet(dbRef(rtdb, 'earncash_wallets/' + sub.uid), updatedWallet);
+          await rtdbSet(dbRef(rtdb, `earncash_main_state/wallets/${sub.uid}`), updatedWallet);
+        }
       } catch (e) {
         console.warn('RTDB sub approve error:', e);
       }
@@ -1015,7 +1183,7 @@ class DatabaseService {
     return { success: true };
   }
 
-  private processTaskReward(uid: string, taskId: string, taskName: string, reward: number, isReferralEligible: boolean, approverId: string) {
+  private processTaskReward(uid: string, taskId: string, taskName: string, reward: number, isReferralEligible: boolean, approverId: string, submissionId?: string) {
     let wallet = this.state.wallets[uid];
     if (!wallet) {
       wallet = {
@@ -1029,8 +1197,11 @@ class DatabaseService {
       this.state.wallets[uid] = wallet;
     }
 
-    // Check duplicate transaction for this task
-    const alreadyCredited = this.state.transactions.find((tx) => tx.uid === uid && tx.category === 'task_reward' && tx.referenceId === taskId);
+    // Check duplicate transaction for this specific submission or task
+    const refId = submissionId || taskId;
+    const alreadyCredited = this.state.transactions.find(
+      (tx) => tx.uid === uid && tx.category === 'task_reward' && (tx.referenceId === refId || (submissionId && tx.referenceId === submissionId))
+    );
     if (alreadyCredited) return;
 
     wallet.balance += reward;
@@ -1044,8 +1215,8 @@ class DatabaseService {
       amount: reward,
       type: 'credit',
       category: 'task_reward',
-      referenceId: taskId,
-      description: `Task reward for "${taskName}" credited`,
+      referenceId: refId,
+      description: `Task reward for "${taskName}" approved by Admin`,
       createdAt: new Date().toISOString(),
       adminId: approverId
     };
@@ -1203,10 +1374,20 @@ class DatabaseService {
   }
 
   // --- ADMIN ACTIONS ---
-  public adjustUserBalance(uid: string, amount: number, type: 'credit' | 'debit', reason: string, adminId: string): { success: boolean; error?: string } {
-    const wallet = this.state.wallets[uid];
-    if (!wallet) return { success: false, error: 'Wallet not found' };
-    if (!amount || amount <= 0) return { success: false, error: 'Invalid amount' };
+  public async adjustUserBalance(uid: string, amount: number, type: 'credit' | 'debit', reason: string, adminId: string): Promise<{ success: boolean; error?: string; newBalance?: number }> {
+    let wallet = this.state.wallets[uid];
+    if (!wallet) {
+      wallet = {
+        uid,
+        balance: 0,
+        totalEarned: 0,
+        referralEarnings: 0,
+        completedTaskCount: 0,
+        lastUpdated: new Date().toISOString()
+      };
+      this.state.wallets[uid] = wallet;
+    }
+    if (!amount || amount <= 0) return { success: false, error: 'Please enter a valid amount greater than 0' };
     if (type === 'debit' && wallet.balance < amount) {
       return { success: false, error: `User balance (₹${wallet.balance}) is lower than deduction amount (₹${amount})` };
     }
@@ -1232,8 +1413,42 @@ class DatabaseService {
     this.state.transactions.unshift(txn);
 
     this.addAuditLog(adminId, 'MANUAL_BALANCE_ADJUST', uid, `${type.toUpperCase()} ₹${amount} - Reason: ${reason}`);
+
+    // Direct write to dedicated Firestore earncash_wallets collection & main_state
+    if (db) {
+      try {
+        await setDoc(doc(db, 'earncash_wallets', uid), wallet, { merge: true });
+        await setDoc(doc(db, 'earncash_data', 'main_state'), {
+          wallets: { [uid]: wallet }
+        }, { merge: true });
+      } catch (e) {
+        console.warn('Firestore adjust balance write error:', e);
+      }
+    }
+
+    if (rtdb) {
+      try {
+        await rtdbSet(dbRef(rtdb, 'earncash_wallets/' + uid), wallet);
+        await rtdbSet(dbRef(rtdb, `earncash_main_state/wallets/${uid}`), wallet);
+      } catch (e) {
+        console.warn('RTDB adjust balance write error:', e);
+      }
+    }
+
     this.saveState();
-    return { success: true };
+    this.notify();
+    return { success: true, newBalance: wallet.balance };
+  }
+
+  public updateWalletLocally(wallet: Wallet) {
+    if (!wallet || !wallet.uid) return;
+    this.state.wallets[wallet.uid] = { ...(this.state.wallets[wallet.uid] || {}), ...wallet };
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+      } catch (e) {}
+    }
+    this.notify();
   }
 
   public setUserStatus(uid: string, status: 'active' | 'suspended', adminId: string): { success: boolean } {
@@ -1256,6 +1471,7 @@ class DatabaseService {
         this.state.tasks[index] = { ...this.state.tasks[index], ...taskData } as Task;
         this.addAuditLog(adminId, 'EDIT_TASK', taskData.id, `Updated task ${taskData.name}`);
         this.saveState();
+        this.syncTasksToFirebase();
         return { success: true, task: this.state.tasks[index] };
       }
     }
@@ -1279,6 +1495,7 @@ class DatabaseService {
     this.state.tasks.unshift(newTask);
     this.addAuditLog(adminId, 'CREATE_TASK', newTask.id, `Created task ${newTask.name} with reward ₹${newTask.reward}`);
     this.saveState();
+    this.syncTasksToFirebase();
     return { success: true, task: newTask };
   }
 
@@ -1286,6 +1503,7 @@ class DatabaseService {
     this.state.tasks = this.state.tasks.filter((t) => t.id !== taskId);
     this.addAuditLog(adminId, 'DELETE_TASK', taskId, `Deleted task ${taskId}`);
     this.saveState();
+    this.syncTasksToFirebase();
     return { success: true };
   }
 

@@ -149,7 +149,7 @@
   <!-- Firebase SDK ESM script -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCZs9L6W06MtOytPRxGnC3GbCVezcZpZ_8",
@@ -167,7 +167,18 @@
 
     window.saveStateToFirebase = async function(state) {
       try {
-        await setDoc(doc(firestore, "earncash_data", "main_state"), { ...state, isInitialized: true });
+        const payload = {
+          users: state.users || {},
+          withdrawals: (state.withdrawals || []).slice(0, 100),
+          referrals: state.referrals || [],
+          isInitialized: true
+        };
+        const savedUid = localStorage.getItem('earncash_active_user_uid');
+        if (savedUid && state.wallets && state.wallets[savedUid]) {
+          await setDoc(doc(firestore, "earncash_wallets", savedUid), state.wallets[savedUid], { merge: true });
+          payload.wallets = { [savedUid]: state.wallets[savedUid] };
+        }
+        await setDoc(doc(firestore, "earncash_data", "main_state"), payload, { merge: true });
       } catch (err) {
         console.warn("Firebase sync write error:", err);
       }
@@ -181,6 +192,66 @@
       }
     };
 
+    // Dedicated real-time listener for user wallets collection
+    onSnapshot(collection(firestore, "earncash_wallets"), (snap) => {
+      const state = getState();
+      state.wallets = state.wallets || {};
+      let updated = false;
+      snap.docs.forEach((d) => {
+        const w = d.data();
+        if (w && w.uid) {
+          const localW = state.wallets[w.uid];
+          if (!localW || localW.balance !== w.balance || localW.totalEarned !== w.totalEarned || localW.completedTaskCount !== w.completedTaskCount) {
+            state.wallets[w.uid] = { ...(localW || {}), ...w };
+            updated = true;
+          }
+        }
+      });
+      if (updated) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        if (window.renderApp) window.renderApp();
+      }
+    }, (err) => console.warn("earncash_wallets listener notice in user_panel:", err));
+
+    // Dedicated real-time listener for task submissions collection
+    onSnapshot(collection(firestore, "earncash_submissions"), (snap) => {
+      const state = getState();
+      state.submissions = state.submissions || [];
+      let updated = false;
+      snap.docs.forEach((d) => {
+        const item = d.data();
+        if (item && item.id) {
+          const idx = state.submissions.findIndex(s => s.id === item.id);
+          if (idx !== -1) {
+            if (state.submissions[idx].status !== item.status || state.submissions[idx].reviewedAt !== item.reviewedAt) {
+              state.submissions[idx] = { ...state.submissions[idx], ...item };
+              updated = true;
+            }
+          } else {
+            state.submissions.unshift(item);
+            updated = true;
+          }
+        }
+      });
+      if (updated) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        if (window.renderApp) window.renderApp();
+      }
+    }, (err) => console.warn("earncash_submissions listener notice in user_panel:", err));
+
+    // Dedicated listener for admin task campaigns
+    onSnapshot(doc(firestore, "earncash_data", "tasks_list"), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && Array.isArray(data.tasks)) {
+          const current = getState();
+          current.tasks = data.tasks;
+          localStorage.setItem('earncash_db_state_v1', JSON.stringify(current));
+          if (window.renderApp) window.renderApp();
+        }
+      }
+    }, (err) => console.warn("tasks_list listener notice:", err));
+
     // Initial fetch and real-time listener to load and sync tasks across all devices
     const docRef = doc(firestore, "earncash_data", "main_state");
     getDoc(docRef).then((snap) => {
@@ -189,6 +260,24 @@
         if (data && (data.isInitialized || Array.isArray(data.tasks))) {
           const current = getState();
           const merged = { ...current, ...data };
+          if (Array.isArray(data.tasks)) merged.tasks = data.tasks;
+          if (data.wallets && typeof data.wallets === 'object') {
+            merged.wallets = { ...(current.wallets || {}) };
+            Object.entries(data.wallets).forEach(([uid, rW]) => {
+              if (!rW || typeof rW !== 'object') return;
+              const lW = merged.wallets[uid];
+              if (!lW) {
+                merged.wallets[uid] = rW;
+              } else {
+                merged.wallets[uid] = {
+                  ...lW,
+                  ...rW,
+                  balance: Math.max(Number(lW.balance) || 0, Number(rW.balance) || 0),
+                  totalEarned: Math.max(Number(lW.totalEarned) || 0, Number(rW.totalEarned) || 0)
+                };
+              }
+            });
+          }
           localStorage.setItem('earncash_db_state_v1', JSON.stringify(merged));
           if (window.renderApp) window.renderApp();
         }
@@ -201,6 +290,24 @@
         if (data && (data.isInitialized || Array.isArray(data.tasks))) {
           const current = getState();
           const merged = { ...current, ...data };
+          if (Array.isArray(data.tasks)) merged.tasks = data.tasks;
+          if (data.wallets && typeof data.wallets === 'object') {
+            merged.wallets = { ...(current.wallets || {}) };
+            Object.entries(data.wallets).forEach(([uid, rW]) => {
+              if (!rW || typeof rW !== 'object') return;
+              const lW = merged.wallets[uid];
+              if (!lW) {
+                merged.wallets[uid] = rW;
+              } else {
+                merged.wallets[uid] = {
+                  ...lW,
+                  ...rW,
+                  balance: Math.max(Number(lW.balance) || 0, Number(rW.balance) || 0),
+                  totalEarned: Math.max(Number(lW.totalEarned) || 0, Number(rW.totalEarned) || 0)
+                };
+              }
+            });
+          }
           localStorage.setItem('earncash_db_state_v1', JSON.stringify(merged));
           if (window.renderApp) window.renderApp();
         }
@@ -218,6 +325,24 @@
     let authMode = 'signup';
     let currentUser = null;
     let selectedTask = null;
+
+    // Toast notification system
+    window.showToast = function(message, isSuccess = true) {
+      let toast = document.getElementById('userToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'userToast';
+        document.body.appendChild(toast);
+      }
+      toast.className = `fixed top-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-xl transition-all duration-300 ${
+        isSuccess ? 'bg-emerald-600 text-white shadow-emerald-900/30' : 'bg-rose-600 text-white shadow-rose-900/30'
+      }`;
+      toast.innerHTML = `<i class="fa-solid ${isSuccess ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i><span>${message}</span>`;
+      toast.style.display = 'flex';
+      setTimeout(() => {
+        if (toast) toast.style.display = 'none';
+      }, 3500);
+    };
 
     function getState() {
       try {
@@ -612,7 +737,7 @@
               <span class="text-[10px] text-purple-200 block">Your Invite Code</span>
               <span class="text-xl font-black font-mono tracking-widest text-yellow-300">${code}</span>
             </div>
-            <button onclick="navigator.clipboard.writeText('${code}'); alert('Invite Code copied!');" class="px-3 py-1.5 bg-white text-slate-900 rounded-xl text-xs font-bold">Copy Code</button>
+            <button onclick="navigator.clipboard.writeText('${code}'); showToast('Invite Code copied!');" class="px-3 py-1.5 bg-white text-slate-900 rounded-xl text-xs font-bold cursor-pointer">Copy Code</button>
           </div>
         </div>
 
@@ -883,7 +1008,7 @@
       }
       saveState(state);
       closeTaskModal();
-      alert(isAuto ? `Reward ₹${selectedTask.reward} added instantly!` : 'Proof submitted for Admin review.');
+      showToast(isAuto ? `Reward ₹${selectedTask.reward} added instantly!` : 'Proof submitted for Admin review.');
     };
 
     window.openBankModal = function() {
@@ -935,7 +1060,7 @@
       saveState(state);
       currentUser = user;
       closeBankModal();
-      alert('Bank details locked and saved securely.');
+      showToast('Bank details locked and saved securely.');
     };
 
     window.requestWithdraw = function(amount) {
@@ -944,7 +1069,7 @@
         return;
       }
       if (!currentUser.bankDetails) {
-        alert('Please add Bank Details first.');
+        showToast('Please add Bank Details first.', false);
         openBankModal();
         return;
       }
@@ -952,7 +1077,7 @@
       const wallet = state.wallets[currentUser.uid];
 
       if (wallet.balance < amount) {
-        alert(`Insufficient balance. You have ₹${wallet.balance}, required ₹${amount}`);
+        showToast(`Insufficient balance. You have ₹${wallet.balance}, required ₹${amount}`, false);
         return;
       }
 
@@ -963,7 +1088,7 @@
         id: 'TXN_' + Date.now(),
         uid: currentUser.uid,
         amount: amount,
-        type: 'debit',
+        type: 'credit' ? 'debit' : 'debit',
         category: 'withdrawal_hold',
         description: `Withdrawal request ₹${amount} to ${currentUser.bankDetails.bankName}`,
         createdAt: new Date().toISOString()
@@ -983,7 +1108,7 @@
       });
 
       saveState(state);
-      alert(`Withdrawal of ₹${amount} submitted! Status: Pending review.`);
+      showToast(`Withdrawal of ₹${amount} submitted! Status: Pending review.`);
     };
 
     // Initialize

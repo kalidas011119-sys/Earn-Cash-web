@@ -36,9 +36,23 @@
 
     window.saveStateToFirebase = async function(state) {
       try {
-        await setDoc(doc(firestore, "earncash_data", "main_state"), { ...state, isInitialized: true });
+        await setDoc(doc(firestore, "earncash_data", "main_state"), { ...state, isInitialized: true }, { merge: true });
       } catch (err) {
         console.warn("Firebase sync write error:", err);
+      }
+    };
+
+    window.saveTasksToFirebase = async function(tasks) {
+      try {
+        const payload = {
+          tasks: tasks || [],
+          lastModified: Date.now(),
+          lastUpdated: new Date().toISOString()
+        };
+        await setDoc(doc(firestore, "earncash_data", "tasks_list"), payload);
+        await setDoc(doc(firestore, "earncash_data", "main_state"), { tasks: tasks || [], lastModifiedTasks: payload.lastModified }, { merge: true });
+      } catch (err) {
+        console.warn("Direct tasks sync write error:", err);
       }
     };
 
@@ -50,13 +64,58 @@
       }
     };
 
+    window.updateWalletInFirebase = async function(uid, wallet) {
+      try {
+        await setDoc(doc(firestore, "earncash_wallets", uid), wallet, { merge: true });
+        await setDoc(doc(firestore, "earncash_data", "main_state"), {
+          wallets: { [uid]: wallet }
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Direct wallet update error in admin:", err);
+      }
+    };
+
+    // Dedicated real-time listener for earncash_wallets
+    onSnapshot(collection(firestore, "earncash_wallets"), (snap) => {
+      const state = getState();
+      state.wallets = state.wallets || {};
+      let updated = false;
+      snap.docs.forEach((d) => {
+        const w = d.data();
+        if (w && w.uid) {
+          state.wallets[w.uid] = { ...(state.wallets[w.uid] || {}), ...w };
+          updated = true;
+        }
+      });
+      if (updated) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        if (window.renderAdmin) window.renderAdmin();
+      }
+    }, (err) => console.warn("earncash_wallets listener notice in admin:", err));
+
+    // Dedicated real-time listener for tasks_list
+    onSnapshot(doc(firestore, "earncash_data", "tasks_list"), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && Array.isArray(data.tasks)) {
+          const state = getState();
+          state.tasks = data.tasks;
+          localStorage.setItem('earncash_db_state_v1', JSON.stringify(state));
+          if (window.renderAdmin) window.renderAdmin();
+        }
+      }
+    }, (err) => console.warn("tasks_list listener notice in admin:", err));
+
     // Initial fetch and real-time listener to sync tasks across all devices
     const docRef = doc(firestore, "earncash_data", "main_state");
     getDoc(docRef).then((snap) => {
       if (snap.exists()) {
         const data = snap.data();
         if (data && (data.isInitialized || Array.isArray(data.tasks))) {
-          localStorage.setItem('earncash_db_state_v1', JSON.stringify(data));
+          const current = getState();
+          const merged = { ...current, ...data };
+          if (Array.isArray(data.tasks)) merged.tasks = data.tasks;
+          localStorage.setItem('earncash_db_state_v1', JSON.stringify(merged));
           if (window.renderAdmin) window.renderAdmin();
         }
       }
@@ -66,7 +125,10 @@
       if (snap.exists()) {
         const data = snap.data();
         if (data && (data.isInitialized || Array.isArray(data.tasks))) {
-          localStorage.setItem('earncash_db_state_v1', JSON.stringify(data));
+          const current = getState();
+          const merged = { ...current, ...data };
+          if (Array.isArray(data.tasks)) merged.tasks = data.tasks;
+          localStorage.setItem('earncash_db_state_v1', JSON.stringify(merged));
           if (window.renderAdmin) window.renderAdmin();
         }
       }
@@ -411,30 +473,80 @@
           </div>
         `;
       } else if (currentAdminTab === 'submissions') {
-        const subs = state.submissions;
+        const subs = state.submissions || [];
         container.innerHTML = `
-          <h2 class="text-xl font-black mb-4">Task Submissions Review (${subs.length})</h2>
-          <div class="bg-slate-900 rounded-3xl border border-slate-800 overflow-x-auto text-xs">
+          <div class="flex justify-between items-center mb-4">
+            <div>
+              <h2 class="text-xl font-black text-white">Task Submissions Review (${subs.length})</h2>
+              <p class="text-xs text-slate-400">Review user uploaded screenshots and approve rewards or reject invalid proofs</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-1 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold">
+                Pending: ${subs.filter(s => s.status === 'pending').length}
+              </span>
+            </div>
+          </div>
+          <div class="bg-slate-900 rounded-3xl border border-slate-800 overflow-x-auto text-xs shadow-xl">
             <table class="w-full text-left">
-              <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px] p-3">
-                <tr><th class="p-3">ID</th><th class="p-3">UID</th><th class="p-3">Task</th><th class="p-3">Reward</th><th class="p-3">Status</th><th class="p-3 text-right">Action</th></tr>
+              <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px]">
+                <tr>
+                  <th class="p-3">Submission ID</th>
+                  <th class="p-3">User UID</th>
+                  <th class="p-3">Contact</th>
+                  <th class="p-3">Task Campaign</th>
+                  <th class="p-3">Reward</th>
+                  <th class="p-3">Proof Screenshot</th>
+                  <th class="p-3">Submitted At</th>
+                  <th class="p-3">Status</th>
+                  <th class="p-3 text-right">Action / Review</th>
+                </tr>
               </thead>
               <tbody class="divide-y divide-slate-800">
                 ${subs.map(s => `
-                  <tr>
-                    <td class="p-3 font-mono text-amber-400">${s.id}</td>
-                    <td class="p-3 font-mono">${s.uid}</td>
-                    <td class="p-3">${s.taskName}</td>
-                    <td class="p-3 text-emerald-400 font-bold">+₹${s.taskReward}</td>
-                    <td class="p-3"><span class="px-2 py-0.5 rounded-full capitalize text-[10px] font-bold ${s.status === 'approved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}">${s.status}</span></td>
+                  <tr class="hover:bg-slate-800/40 transition">
+                    <td class="p-3 font-mono text-amber-400 font-bold">${s.id}</td>
+                    <td class="p-3 font-mono font-bold text-white">${s.uid}</td>
+                    <td class="p-3 text-slate-300">${s.phoneOrEmail || '-'}</td>
+                    <td class="p-3 font-medium text-white max-w-xs truncate">${s.taskName}</td>
+                    <td class="p-3 text-emerald-400 font-black text-sm">+₹${s.taskReward}</td>
+                    <td class="p-3">
+                      ${s.proofImageUrl ? `
+                        <button onclick="viewProof('${s.proofImageUrl}')" class="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 rounded-lg text-xs font-bold transition cursor-pointer">
+                          <i class="fa-solid fa-eye"></i> View Proof
+                        </button>
+                      ` : '<span class="text-slate-500 italic">No image</span>'}
+                    </td>
+                    <td class="p-3 text-[11px] text-slate-400">${new Date(s.submittedAt).toLocaleString()}</td>
+                    <td class="p-3">
+                      <span class="px-2 py-0.5 rounded-full capitalize text-[10px] font-bold ${
+                        s.status === 'approved'
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : s.status === 'rejected'
+                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                      }">
+                        ${s.status}
+                      </span>
+                    </td>
                     <td class="p-3 text-right">
                       ${s.status === 'pending' ? `
-                        <button onclick="approveSub('${s.id}')" class="px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold">Approve</button>
-                        <button onclick="rejectSub('${s.id}')" class="px-2.5 py-1 bg-rose-600 text-white rounded-lg font-bold">Reject</button>
-                      ` : '<span class="text-slate-500">Processed</span>'}
+                        <div class="flex items-center justify-end gap-2">
+                          <button onclick="approveSub('${s.id}')" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-md transition cursor-pointer active:scale-95">
+                            <i class="fa-solid fa-check mr-1"></i> Approve (+₹${s.taskReward})
+                          </button>
+                          <button onclick="rejectSub('${s.id}')" class="px-3 py-1.5 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-600/50 rounded-xl font-bold text-xs transition cursor-pointer active:scale-95">
+                            <i class="fa-solid fa-xmark mr-1"></i> Reject
+                          </button>
+                        </div>
+                      ` : `
+                        <span class="text-[11px] text-slate-500">
+                          ${s.reviewedBy ? `by ${s.reviewedBy}` : 'Processed'}
+                          ${s.rejectionReason ? `<br><span class="text-rose-400 text-[10px]">(${s.rejectionReason})</span>` : ''}
+                        </span>
+                      `}
                     </td>
                   </tr>
-                `).join('') || '<tr><td colspan="6" class="p-6 text-center text-slate-500">No submissions</td></tr>'}
+                `).join('') || '<tr><td colspan="9" class="p-8 text-center text-slate-500">No task submissions received yet</td></tr>'}
               </tbody>
             </table>
           </div>
@@ -468,48 +580,431 @@
             </table>
           </div>
         `;
+      } else if (currentAdminTab === 'users') {
+        const usersList = Object.values(state.users || {});
+        const search = (window.adminUserSearch || '').toLowerCase().trim();
+        const filteredUsers = usersList.filter(u => {
+          if (!search) return true;
+          return (u.uid && u.uid.toLowerCase().includes(search)) ||
+                 (u.phone && u.phone.includes(search)) ||
+                 (u.inviteCode && u.inviteCode.toLowerCase().includes(search));
+        });
+
+        const totalUserBal = usersList.reduce((sum, u) => {
+          const w = state.wallets[u.uid];
+          return sum + (w && typeof w.balance === 'number' ? w.balance : 0);
+        }, 0);
+        const activeUsersCount = usersList.filter(u => u.status !== 'suspended').length;
+        const suspendedUsersCount = usersList.filter(u => u.status === 'suspended').length;
+
+        container.innerHTML = `
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+            <div>
+              <h2 class="text-xl font-black text-white">User Accounts & Wallet Control (${usersList.length})</h2>
+              <p class="text-xs text-slate-400">Search users, instantly credit/debit balances, view bank accounts & activity</p>
+            </div>
+            <div class="relative w-full sm:w-72">
+              <input
+                type="text"
+                placeholder="Search UID, Phone, Invite Code..."
+                value="${window.adminUserSearch || ''}"
+                oninput="window.adminUserSearch = this.value; renderTabContent(getState());"
+                class="w-full px-3.5 py-2 pl-9 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+              <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 text-xs"></i>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+            <div class="bg-slate-900 p-3.5 rounded-2xl border border-slate-800">
+              <span class="text-[10px] font-bold text-slate-400 block uppercase">Total Registered</span>
+              <p class="text-xl font-black text-white mt-0.5">${usersList.length}</p>
+            </div>
+            <div class="bg-slate-900 p-3.5 rounded-2xl border border-slate-800">
+              <span class="text-[10px] font-bold text-slate-400 block uppercase">Total In-Wallet</span>
+              <p class="text-xl font-black text-emerald-400 mt-0.5">₹${totalUserBal.toLocaleString('en-IN')}</p>
+            </div>
+            <div class="bg-slate-900 p-3.5 rounded-2xl border border-slate-800">
+              <span class="text-[10px] font-bold text-slate-400 block uppercase">Active Accounts</span>
+              <p class="text-xl font-black text-amber-400 mt-0.5">${activeUsersCount}</p>
+            </div>
+            <div class="bg-slate-900 p-3.5 rounded-2xl border border-slate-800">
+              <span class="text-[10px] font-bold text-slate-400 block uppercase">Suspended</span>
+              <p class="text-xl font-black text-rose-400 mt-0.5">${suspendedUsersCount}</p>
+            </div>
+          </div>
+
+          <div class="bg-slate-900 rounded-3xl border border-slate-800 overflow-x-auto text-xs shadow-xl">
+            <table class="w-full text-left">
+              <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px]">
+                <tr>
+                  <th class="p-3">User Profile</th>
+                  <th class="p-3">Invite Code</th>
+                  <th class="p-3">Wallet Balance</th>
+                  <th class="p-3">Total Earned</th>
+                  <th class="p-3">Tasks</th>
+                  <th class="p-3">Bank Details</th>
+                  <th class="p-3">Status</th>
+                  <th class="p-3 text-right">Balance & Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800">
+                ${filteredUsers.map(u => {
+                  const w = state.wallets[u.uid] || { balance: 0, totalEarned: 0, completedTaskCount: 0 };
+                  const b = u.bankDetails;
+                  return `
+                    <tr class="hover:bg-slate-800/30 transition">
+                      <td class="p-3">
+                        <div class="flex items-center gap-2.5">
+                          <div class="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-amber-400 text-xs">
+                            ${u.phone ? u.phone.slice(-2) : 'U'}
+                          </div>
+                          <div>
+                            <div class="font-bold text-white">+91 ${u.phone}</div>
+                            <div class="font-mono text-[10px] text-amber-400 font-bold">UID: ${u.uid}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="p-3">
+                        <span class="font-mono text-slate-300 font-bold">${u.inviteCode || '-'}</span>
+                        ${u.inviterCode ? `<span class="block text-[10px] text-slate-500 font-mono">By: ${u.inviterCode}</span>` : ''}
+                      </td>
+                      <td class="p-3">
+                        <span class="font-black text-emerald-400 text-sm">₹${w.balance || 0}</span>
+                      </td>
+                      <td class="p-3 text-slate-300 font-semibold">₹${w.totalEarned || 0}</td>
+                      <td class="p-3 text-slate-400">${w.completedTaskCount || 0}</td>
+                      <td class="p-3">
+                        ${b ? `
+                          <div class="text-[11px] text-slate-300">
+                            <span class="font-bold text-white">${b.bankName}</span>
+                            <span class="text-slate-500 block font-mono">••••${(b.accountNumber || '').slice(-4)} (${b.ifscCode})</span>
+                          </div>
+                        ` : '<span class="text-slate-500 italic text-[11px]">Not linked</span>'}
+                      </td>
+                      <td class="p-3">
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${
+                          u.status === 'suspended' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        }">
+                          ${u.status || 'active'}
+                        </span>
+                      </td>
+                      <td class="p-3 text-right">
+                        <div class="flex items-center justify-end gap-1.5">
+                          <button
+                            onclick="openAdjustBalanceModal('${u.uid}', 'credit')"
+                            class="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-md transition cursor-pointer active:scale-95"
+                            title="Add money to wallet"
+                          >
+                            <i class="fa-solid fa-plus mr-1"></i> Add Balance
+                          </button>
+                          <button
+                            onclick="openAdjustBalanceModal('${u.uid}', 'debit')"
+                            class="px-2.5 py-1.5 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-600/50 rounded-xl font-bold text-xs transition cursor-pointer active:scale-95"
+                            title="Deduct money from wallet"
+                          >
+                            <i class="fa-solid fa-minus mr-1"></i> Deduct
+                          </button>
+                          <button
+                            onclick="openUserDetailsModal('${u.uid}')"
+                            class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs border border-slate-700 transition cursor-pointer"
+                            title="View user details & history"
+                          >
+                            <i class="fa-solid fa-eye"></i>
+                          </button>
+                          <button
+                            onclick="toggleUserStatus('${u.uid}')"
+                            class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-amber-400 rounded-xl text-xs border border-slate-700 transition cursor-pointer"
+                            title="Suspend or activate user"
+                          >
+                            <i class="fa-solid ${u.status === 'suspended' ? 'fa-unlock text-emerald-400' : 'fa-ban text-rose-400'}"></i>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join('') || '<tr><td colspan="8" class="p-8 text-center text-slate-500">No users found matching query</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else if (currentAdminTab === 'referrals') {
+        const refs = state.referrals || [];
+        container.innerHTML = `
+          <div class="flex justify-between items-center mb-4">
+            <div>
+              <h2 class="text-xl font-black text-white">Referral Network Audit (${refs.length})</h2>
+              <p class="text-xs text-slate-400">Track 3-task qualification pipeline and referral bonus payouts</p>
+            </div>
+          </div>
+          <div class="bg-slate-900 rounded-3xl border border-slate-800 overflow-x-auto text-xs shadow-xl">
+            <table class="w-full text-left">
+              <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px]">
+                <tr>
+                  <th class="p-3">Ref ID</th>
+                  <th class="p-3">Inviter UID</th>
+                  <th class="p-3">Invited User Phone / UID</th>
+                  <th class="p-3">Task Progress</th>
+                  <th class="p-3">Reward</th>
+                  <th class="p-3">Reward Status</th>
+                  <th class="p-3">Date</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800">
+                ${refs.map(r => `
+                  <tr>
+                    <td class="p-3 font-mono text-amber-400 font-bold">${r.id}</td>
+                    <td class="p-3 font-mono font-bold text-white">${r.inviterUid}</td>
+                    <td class="p-3 text-slate-300 font-mono">+91 ${r.invitedPhone || '-'} (${r.invitedUid})</td>
+                    <td class="p-3">
+                      <div class="flex items-center gap-2">
+                        <div class="w-20 bg-slate-800 rounded-full h-2 overflow-hidden">
+                          <div class="bg-amber-500 h-full" style="width: ${Math.min(100, ((r.eligibleTasksCompleted || 0) / (r.requiredTasks || 3)) * 100)}%"></div>
+                        </div>
+                        <span class="font-bold text-slate-300">${r.eligibleTasksCompleted || 0}/${r.requiredTasks || 3}</span>
+                      </div>
+                    </td>
+                    <td class="p-3 text-emerald-400 font-black">₹${r.rewardAmount || 20}</td>
+                    <td class="p-3">
+                      <span class="px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${
+                        r.rewardPaid ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                      }">
+                        ${r.rewardPaid ? 'Paid' : (r.status || 'pending')}
+                      </span>
+                    </td>
+                    <td class="p-3 text-slate-500 text-[11px]">${new Date(r.createdAt).toLocaleDateString()}</td>
+                  </tr>
+                `).join('') || '<tr><td colspan="7" class="p-8 text-center text-slate-500">No referral relationships recorded</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else if (currentAdminTab === 'settings') {
+        const s = state.settings || {};
+        container.innerHTML = `
+          <div class="max-w-xl space-y-4">
+            <div>
+              <h2 class="text-xl font-black text-white">Platform Configuration</h2>
+              <p class="text-xs text-slate-400">Manage financial rules, minimum payouts, and support links</p>
+            </div>
+            <form onsubmit="saveSettingsFromAdmin(event)" class="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 text-xs">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block font-bold text-slate-300 mb-1">Signup Bonus (₹)</label>
+                  <input id="cfgSignup" type="number" value="${s.signupBonus || 20}" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-bold" />
+                </div>
+                <div>
+                  <label class="block font-bold text-slate-300 mb-1">Referral Reward (₹)</label>
+                  <input id="cfgRef" type="number" value="${s.referralReward || 20}" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-bold" />
+                </div>
+              </div>
+              <div>
+                <label class="block font-bold text-slate-300 mb-1">Required Referral Tasks</label>
+                <input id="cfgTasksReq" type="number" value="${s.requiredReferralTasks || 3}" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-bold" />
+              </div>
+              <div>
+                <label class="block font-bold text-slate-300 mb-1">Official Telegram Community Link</label>
+                <input id="cfgTg" type="text" value="${s.supportTelegram || 'https://t.me/luckyuserbonus'}" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono" />
+              </div>
+              <button type="submit" class="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black rounded-xl text-xs shadow-lg hover:opacity-95 cursor-pointer">
+                Save Platform Settings
+              </button>
+            </form>
+          </div>
+        `;
+      } else if (currentAdminTab === 'audit') {
+        const logs = state.auditLogs || [];
+        container.innerHTML = `
+          <div class="flex justify-between items-center mb-4">
+            <div>
+              <h2 class="text-xl font-black text-white">Immutable Security Audit Trail (${logs.length})</h2>
+              <p class="text-xs text-slate-400">Chronological history of admin actions, adjustments, approvals</p>
+            </div>
+          </div>
+          <div class="bg-slate-900 rounded-3xl border border-slate-800 overflow-x-auto text-xs shadow-xl">
+            <table class="w-full text-left">
+              <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px]">
+                <tr>
+                  <th class="p-3">Timestamp</th>
+                  <th class="p-3">Operator</th>
+                  <th class="p-3">Action</th>
+                  <th class="p-3">Target</th>
+                  <th class="p-3">Details / Audit Memo</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800">
+                ${logs.map(l => `
+                  <tr>
+                    <td class="p-3 text-slate-500 font-mono text-[11px]">${new Date(l.timestamp).toLocaleString()}</td>
+                    <td class="p-3 font-mono font-bold text-amber-400">${l.adminId}</td>
+                    <td class="p-3 font-bold text-white uppercase text-[10px]"><span class="px-2 py-0.5 bg-slate-800 rounded-md">${l.action}</span></td>
+                    <td class="p-3 font-mono text-slate-300">${l.targetRecord || '-'}</td>
+                    <td class="p-3 text-slate-400">${l.details}</td>
+                  </tr>
+                `).join('') || '<tr><td colspan="5" class="p-8 text-center text-slate-500">No audit logs recorded</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        `;
       } else {
-        container.innerHTML = `<div class="p-6 bg-slate-900 border border-slate-800 rounded-3xl text-sm">Please navigate through the sidebar tabs. Full synchronization is active.</div>`;
+        container.innerHTML = `<div class="p-6 bg-slate-900 border border-slate-800 rounded-3xl text-sm">Please select a valid tab from the sidebar.</div>`;
       }
     }
 
+    // Toast Notification System
+    window.showToast = function(message, isSuccess = true) {
+      let toast = document.getElementById('adminToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'adminToast';
+        toast.className = 'fixed top-5 right-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-2xl text-xs font-bold shadow-2xl transition-all duration-300 transform translate-y-0';
+        document.body.appendChild(toast);
+      }
+      toast.className = `fixed top-5 right-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-2xl text-xs font-bold shadow-2xl transition-all duration-300 ${
+        isSuccess ? 'bg-emerald-600 text-white shadow-emerald-900/40' : 'bg-rose-600 text-white shadow-rose-900/40'
+      }`;
+      toast.innerHTML = `<i class="fa-solid ${isSuccess ? 'fa-circle-check' : 'fa-circle-exclamation'} text-sm"></i><span>${message}</span>`;
+      toast.style.display = 'flex';
+      setTimeout(() => {
+        if (toast) toast.style.display = 'none';
+      }, 4000);
+    };
+
+    // Task Management Methods
     window.deleteTaskDirect = function(taskId) {
-      if (!confirm("Are you sure you want to delete this task?")) return;
       const state = getState();
       const task = (state.tasks || []).find(t => t.id === taskId);
       const name = task ? task.name : taskId;
       state.tasks = (state.tasks || []).filter(t => t.id !== taskId);
       addAuditLog(state, 'DELETE_TASK', taskId, `Deleted task "${name}"`);
+      if (window.saveTasksToFirebase) {
+        window.saveTasksToFirebase(state.tasks);
+      }
       saveState(state);
       renderAdmin();
+      showToast(`Task "${name}" deleted successfully!`);
     };
 
     window.openAddTaskModal = function() {
-      const name = prompt('Enter Task Name:') || '';
-      if (!name.trim()) return;
-      const reward = prompt('Enter Reward (₹):', '25') || '25';
-      const link = prompt('Enter Task Link:', 'https://t.me/luckyuserbonus') || 'https://t.me/luckyuserbonus';
+      let modal = document.getElementById('addTaskModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'addTaskModal';
+        modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs';
+        document.body.appendChild(modal);
+      }
+      modal.innerHTML = `
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full text-white space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+            <div>
+              <h3 class="text-base font-black text-white flex items-center gap-2">
+                <i class="fa-solid fa-plus-circle text-amber-400"></i> Create New Task Campaign
+              </h3>
+              <p class="text-xs text-slate-400">Add a task with link, reward and instructions</p>
+            </div>
+            <button onclick="document.getElementById('addTaskModal').remove()" class="text-slate-400 hover:text-white p-1 cursor-pointer">
+              <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+          </div>
+
+          <form id="createTaskForm" onsubmit="window.submitNewTaskForm(event)" class="space-y-3.5 text-xs">
+            <div>
+              <label class="block font-bold text-slate-300 mb-1">Task Campaign Name *</label>
+              <input id="newTaskName" required placeholder="e.g. Join Official Telegram Channel" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-500" />
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block font-bold text-slate-300 mb-1">Reward (₹) *</label>
+                <input id="newTaskReward" type="number" min="1" value="25" required class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-500" />
+              </div>
+              <div>
+                <label class="block font-bold text-slate-300 mb-1">Category</label>
+                <select id="newTaskCategory" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-500">
+                  <option value="Social">Social</option>
+                  <option value="Telegram">Telegram</option>
+                  <option value="App Install">App Install</option>
+                  <option value="Review">Play Store Review</option>
+                  <option value="Gaming">Gaming</option>
+                  <option value="Survey">Survey</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-300 mb-1">Task URL / Link *</label>
+              <input id="newTaskLink" required value="https://t.me/luckyuserbonus" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-500" />
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-300 mb-1">Approval Mode</label>
+              <select id="newTaskApproval" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-500">
+                <option value="manual">Manual (Admin reviews proof screenshot)</option>
+                <option value="automatic">Automatic (Instant reward after claim)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-300 mb-1">Task Instructions (Steps)</label>
+              <textarea id="newTaskSteps" rows="2" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-500" placeholder="1. Open link&#10;2. Complete steps&#10;3. Upload proof screenshot">Open link\nComplete steps\nUpload screenshot proof</textarea>
+            </div>
+
+            <div class="flex gap-2 pt-2">
+              <button type="button" onclick="document.getElementById('addTaskModal').remove()" class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold cursor-pointer">
+                Cancel
+              </button>
+              <button type="submit" class="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-95 text-slate-950 rounded-xl font-black shadow-lg cursor-pointer">
+                Create Task
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+    };
+
+    window.submitNewTaskForm = function(e) {
+      e.preventDefault();
+      const name = document.getElementById('newTaskName').value.trim();
+      const reward = Number(document.getElementById('newTaskReward').value) || 25;
+      const category = document.getElementById('newTaskCategory').value;
+      const link = document.getElementById('newTaskLink').value.trim() || 'https://t.me/luckyuserbonus';
+      const approvalMode = document.getElementById('newTaskApproval').value;
+      const stepsText = document.getElementById('newTaskSteps').value;
+      const steps = stepsText.split('\n').map(s => s.trim()).filter(Boolean);
+
+      if (!name) return;
+
       const state = getState();
       state.tasks = state.tasks || [];
-      state.tasks.unshift({
+      const newTask = {
         id: 'TSK_' + Date.now(),
-        name: name.trim(),
+        name,
         logo: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100&auto=format&fit=crop&q=60',
-        reward: Number(reward) || 25,
+        reward,
         description: 'Complete task steps to earn instant reward.',
-        rules: ['One submission per user'],
+        rules: ['One submission per user', 'Original screenshot proof required'],
         conditions: ['Valid account'],
-        steps: ['Open link', 'Complete steps', 'Upload proof'],
-        taskLink: link.trim(),
-        category: 'General',
+        steps: steps.length > 0 ? steps : ['Open link', 'Complete steps', 'Upload proof screenshot'],
+        taskLink: link,
+        category,
         status: 'active',
-        approvalMode: 'manual',
+        approvalMode,
         isReferralEligible: true,
         createdAt: new Date().toISOString()
-      });
-      addAuditLog(state, 'CREATE_TASK', name, `Created task with reward ₹${reward}`);
+      };
+
+      state.tasks.unshift(newTask);
+      addAuditLog(state, 'CREATE_TASK', name, `Created task campaign with reward ₹${reward}`);
+
+      if (window.saveTasksToFirebase) {
+        window.saveTasksToFirebase(state.tasks);
+      }
       saveState(state);
       renderAdmin();
+
+      const modal = document.getElementById('addTaskModal');
+      if (modal) modal.remove();
+      showToast(`✓ Task "${name}" created and published!`);
     };
 
     window.viewProof = function(url) {
@@ -520,12 +1015,12 @@
         <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-lg w-full text-white space-y-3 shadow-2xl">
           <div class="flex justify-between items-center">
             <h3 class="text-sm font-bold"><i class="fa-solid fa-eye text-amber-400 mr-2"></i>Proof Screenshot</h3>
-            <button onclick="document.getElementById('proofModal').remove()" class="text-slate-400 hover:text-white p-1"><i class="fa-solid fa-xmark"></i></button>
+            <button onclick="document.getElementById('proofModal').remove()" class="text-slate-400 hover:text-white p-1 cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
           </div>
           <div class="max-h-[65vh] overflow-auto rounded-2xl bg-black flex items-center justify-center p-2 border border-slate-800">
             <img src="${url}" class="max-h-full max-w-full object-contain rounded-xl" />
           </div>
-          <button onclick="document.getElementById('proofModal').remove()" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold">Close</button>
+          <button onclick="document.getElementById('proofModal').remove()" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold cursor-pointer">Close</button>
         </div>
       `;
       if (!document.getElementById('proofModal')) {
@@ -533,6 +1028,7 @@
       }
     };
 
+    // Submissions Review: Approve
     window.approveSub = function(subId) {
       const state = getState();
       const sub = (state.submissions || []).find(s => s.id === subId);
@@ -577,13 +1073,72 @@
       if (window.updateSubmissionInFirebase) {
         window.updateSubmissionInFirebase(sub);
       }
+      if (window.updateWalletInFirebase) {
+        window.updateWalletInFirebase(sub.uid, wallet);
+      }
       saveState(state);
       renderAdmin();
-      alert(`Submission approved! ₹${sub.taskReward} credited to user ${sub.uid}.`);
+      showToast(`✓ Approved! ₹${sub.taskReward} credited to user ${sub.uid}. New Balance: ₹${wallet.balance}`);
     };
 
+    // Submissions Review: Reject Modal
     window.rejectSub = function(subId) {
-      const reason = prompt('Enter rejection reason:') || 'Proof verification failed';
+      let modal = document.getElementById('rejectModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'rejectModal';
+        modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs';
+        document.body.appendChild(modal);
+      }
+      modal.innerHTML = `
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full text-white space-y-4 shadow-2xl">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+            <h3 class="text-sm font-black text-rose-400 flex items-center gap-2">
+              <i class="fa-solid fa-circle-xmark"></i> Reject Submission
+            </h3>
+            <button onclick="document.getElementById('rejectModal').remove()" class="text-slate-400 hover:text-white p-1 cursor-pointer">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <p class="text-xs text-slate-300">Select reason for rejecting submission <span class="font-mono text-amber-400 font-bold">${subId}</span>:</p>
+
+          <div class="space-y-1.5 text-xs">
+            <button type="button" onclick="document.getElementById('rejectReasonInput').value='Screenshot is blurry or unreadable'" class="w-full text-left p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl transition text-slate-300">
+              • Screenshot is blurry or unreadable
+            </button>
+            <button type="button" onclick="document.getElementById('rejectReasonInput').value='Required task steps not completed'" class="w-full text-left p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl transition text-slate-300">
+              • Required task steps not completed
+            </button>
+            <button type="button" onclick="document.getElementById('rejectReasonInput').value='Duplicate proof or already claimed'" class="w-full text-left p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl transition text-slate-300">
+              • Duplicate proof or already claimed
+            </button>
+            <button type="button" onclick="document.getElementById('rejectReasonInput').value='Account details mismatch'" class="w-full text-left p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl transition text-slate-300">
+              • Account details mismatch
+            </button>
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-bold text-slate-400 mb-1">Custom Reason:</label>
+            <input id="rejectReasonInput" value="Proof verification failed" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500" />
+          </div>
+
+          <div class="flex gap-2 pt-2">
+            <button type="button" onclick="document.getElementById('rejectModal').remove()" class="flex-1 py-2 bg-slate-800 text-slate-300 rounded-xl font-bold text-xs cursor-pointer">
+              Cancel
+            </button>
+            <button type="button" onclick="window.confirmRejectSub('${subId}')" class="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold text-xs shadow-lg cursor-pointer">
+              Confirm Reject
+            </button>
+          </div>
+        </div>
+      `;
+    };
+
+    window.confirmRejectSub = function(subId) {
+      const reasonInput = document.getElementById('rejectReasonInput');
+      const reason = reasonInput ? reasonInput.value.trim() : 'Proof verification failed';
+
       const state = getState();
       const sub = (state.submissions || []).find(s => s.id === subId);
       if (!sub) return;
@@ -599,7 +1154,10 @@
       }
       saveState(state);
       renderAdmin();
-      alert(`Submission for ${sub.uid} rejected.`);
+
+      const modal = document.getElementById('rejectModal');
+      if (modal) modal.remove();
+      showToast('✗ Submission rejected.', false);
     };
 
     window.completeWithdraw = function(wId) {
@@ -610,10 +1168,41 @@
       addAuditLog(state, 'WITHDRAWAL_COMPLETED', w.id, `Payout ₹${w.amount} transferred to ${w.uid}`);
       saveState(state);
       renderAdmin();
+      showToast(`✓ Withdrawal #${w.id} marked as Completed!`);
     };
 
     window.rejectWithdraw = function(wId) {
-      const reason = prompt('Enter rejection reason:') || 'Bank account invalid';
+      let modal = document.getElementById('rejectWthModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'rejectWthModal';
+        modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs';
+        document.body.appendChild(modal);
+      }
+      modal.innerHTML = `
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full text-white space-y-4 shadow-2xl text-xs">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+            <h3 class="text-sm font-black text-rose-400">Reject & Refund Withdrawal</h3>
+            <button onclick="document.getElementById('rejectWthModal').remove()" class="text-slate-400 hover:text-white p-1 cursor-pointer">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-400 mb-1">Rejection Reason:</label>
+            <input id="rejectWthReason" value="Bank account / IFSC invalid" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none" />
+          </div>
+          <div class="flex gap-2 pt-2">
+            <button onclick="document.getElementById('rejectWthModal').remove()" class="flex-1 py-2 bg-slate-800 rounded-xl font-bold cursor-pointer">Cancel</button>
+            <button onclick="window.confirmRejectWithdraw('${wId}')" class="flex-1 py-2 bg-rose-600 hover:bg-rose-500 rounded-xl font-bold cursor-pointer">Refund User</button>
+          </div>
+        </div>
+      `;
+    };
+
+    window.confirmRejectWithdraw = function(wId) {
+      const reasonInput = document.getElementById('rejectWthReason');
+      const reason = reasonInput ? reasonInput.value.trim() : 'Bank details invalid';
+
       const state = getState();
       const w = (state.withdrawals || []).find(x => x.id === wId);
       if (!w || w.status === 'rejected') return;
@@ -639,6 +1228,267 @@
       addAuditLog(state, 'WITHDRAWAL_REJECTED', w.id, `Rejected and refunded ₹${w.amount} to user ${w.uid}`);
       saveState(state);
       renderAdmin();
+
+      const modal = document.getElementById('rejectWthModal');
+      if (modal) modal.remove();
+      showToast(`✗ Withdrawal rejected and ₹${w.amount} refunded to wallet.`);
+    };
+
+    // User Management Action Handlers
+    window.openAdjustBalanceModal = function(uid, type = 'credit') {
+      const state = getState();
+      const user = state.users[uid] || { uid, phone: uid };
+      const wallet = state.wallets[uid] || { balance: 0, totalEarned: 0 };
+
+      let modal = document.getElementById('adjustBalanceModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'adjustBalanceModal';
+        modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs';
+        document.body.appendChild(modal);
+      }
+
+      modal.innerHTML = `
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full text-white space-y-4 shadow-2xl text-xs">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+            <h3 class="text-sm font-black flex items-center gap-2 ${type === 'credit' ? 'text-emerald-400' : 'text-rose-400'}">
+              <i class="fa-solid ${type === 'credit' ? 'fa-circle-plus' : 'fa-circle-minus'}"></i>
+              ${type === 'credit' ? 'Add Balance (Credit)' : 'Deduct Balance (Debit)'}
+            </h3>
+            <button onclick="document.getElementById('adjustBalanceModal').remove()" class="text-slate-400 hover:text-white p-1 cursor-pointer">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <div class="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex justify-between items-center">
+            <div>
+              <span class="text-slate-400 text-[10px] block">Target User</span>
+              <span class="font-bold text-white">+91 ${user.phone || uid}</span>
+              <span class="text-slate-500 font-mono text-[10px] block">UID: ${user.uid}</span>
+            </div>
+            <div class="text-right">
+              <span class="text-slate-400 text-[10px] block">Current Balance</span>
+              <span class="text-lg font-black text-emerald-400">₹${wallet.balance || 0}</span>
+            </div>
+          </div>
+
+          <form onsubmit="window.submitAdjustBalance(event, '${uid}', '${type}')" class="space-y-3.5">
+            <div>
+              <div class="flex justify-between items-center mb-1">
+                <label class="block font-bold text-slate-300">Amount (₹) *</label>
+                <span class="text-[10px] text-slate-400">Quick fill:</span>
+              </div>
+              <div class="flex flex-wrap gap-1 mb-2">
+                ${[10, 20, 50, 100, 200, 500].map(amt => `
+                  <button type="button" onclick="document.getElementById('adjustBalAmt').value='${amt}'" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 active:scale-95 text-amber-400 rounded-lg font-bold text-[11px] border border-slate-700 cursor-pointer">
+                    +₹${amt}
+                  </button>
+                `).join('')}
+              </div>
+              <input id="adjustBalAmt" type="number" min="1" value="50" required class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-bold text-sm focus:outline-none focus:border-amber-500" />
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-300 mb-1">Audit Reason / Note *</label>
+              <input id="adjustBalReason" value="${type === 'credit' ? 'Admin promotional bonus credit' : 'Account correction deduction'}" required class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-500" />
+            </div>
+
+            <div class="flex gap-2 pt-2">
+              <button type="button" onclick="document.getElementById('adjustBalanceModal').remove()" class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold cursor-pointer">
+                Cancel
+              </button>
+              <button type="submit" class="flex-1 py-2.5 rounded-xl font-black text-white shadow-lg cursor-pointer ${
+                type === 'credit' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-rose-600 hover:bg-rose-500'
+              }">
+                Confirm ${type === 'credit' ? 'Credit' : 'Debit'}
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+    };
+
+    window.submitAdjustBalance = async function(e, uid, type) {
+      e.preventDefault();
+      const amtInput = document.getElementById('adjustBalAmt');
+      const amount = Number(amtInput ? amtInput.value : 0);
+      const reasonInput = document.getElementById('adjustBalReason');
+      const reason = reasonInput ? reasonInput.value.trim() : 'Admin manual balance adjustment';
+
+      if (!amount || amount <= 0) {
+        showToast('Please enter a valid amount greater than 0', false);
+        return;
+      }
+
+      const state = getState();
+      state.wallets = state.wallets || {};
+      let wallet = state.wallets[uid];
+      if (!wallet) {
+        wallet = {
+          uid,
+          balance: 0,
+          totalEarned: 0,
+          referralEarnings: 0,
+          completedTaskCount: 0,
+          lastUpdated: new Date().toISOString()
+        };
+        state.wallets[uid] = wallet;
+      }
+
+      if (type === 'debit' && (wallet.balance || 0) < amount) {
+        showToast(`Cannot deduct ₹${amount}: user only has ₹${wallet.balance}`, false);
+        return;
+      }
+
+      if (type === 'credit') {
+        wallet.balance = (Number(wallet.balance) || 0) + amount;
+        wallet.totalEarned = (Number(wallet.totalEarned) || 0) + amount;
+      } else {
+        wallet.balance = (Number(wallet.balance) || 0) - amount;
+      }
+      wallet.lastUpdated = new Date().toISOString();
+
+      state.transactions = state.transactions || [];
+      const txn = {
+        id: 'TXN_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+        uid,
+        amount,
+        type,
+        category: type === 'credit' ? 'admin_credit' : 'admin_debit',
+        description: `Admin balance adjustment: ${reason}`,
+        createdAt: new Date().toISOString(),
+        adminId: '8471835378'
+      };
+      state.transactions.unshift(txn);
+
+      const user = state.users[uid];
+      const targetName = user ? (user.phone || uid) : uid;
+      addAuditLog(state, 'MANUAL_BALANCE_ADJUST', uid, `${type.toUpperCase()} ₹${amount} - Reason: ${reason}`);
+
+      if (window.updateWalletInFirebase) {
+        await window.updateWalletInFirebase(uid, wallet);
+      }
+      saveState(state);
+      renderAdmin();
+
+      const modal = document.getElementById('adjustBalanceModal');
+      if (modal) modal.remove();
+
+      showToast(`✓ Successfully ${type === 'credit' ? 'credited' : 'deducted'} ₹${amount} for user ${targetName}! New Balance: ₹${wallet.balance}`);
+    };
+
+    window.openUserDetailsModal = function(uid) {
+      const state = getState();
+      const user = state.users[uid] || { uid, phone: uid };
+      const wallet = state.wallets[uid] || { balance: 0, totalEarned: 0, completedTaskCount: 0 };
+      const b = user.bankDetails;
+      const userTxns = (state.transactions || []).filter(t => t.uid === uid).slice(0, 10);
+      const userSubs = (state.submissions || []).filter(s => s.uid === uid).slice(0, 10);
+
+      let modal = document.getElementById('userDetailsModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'userDetailsModal';
+        modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs';
+        document.body.appendChild(modal);
+      }
+
+      modal.innerHTML = `
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full text-white space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto text-xs">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+            <div>
+              <h3 class="text-base font-black text-white">User Profile & Activity</h3>
+              <p class="text-slate-400 font-mono text-[11px]">+91 ${user.phone || '-'} • UID: ${user.uid}</p>
+            </div>
+            <button onclick="document.getElementById('userDetailsModal').remove()" class="text-slate-400 hover:text-white p-1 cursor-pointer">
+              <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2">
+            <div class="p-3 bg-slate-950 rounded-2xl border border-slate-800">
+              <span class="text-slate-400 text-[10px] block">Wallet Balance</span>
+              <span class="text-lg font-black text-emerald-400">₹${wallet.balance || 0}</span>
+            </div>
+            <div class="p-3 bg-slate-950 rounded-2xl border border-slate-800">
+              <span class="text-slate-400 text-[10px] block">Total Earned</span>
+              <span class="text-lg font-black text-white">₹${wallet.totalEarned || 0}</span>
+            </div>
+            <div class="p-3 bg-slate-950 rounded-2xl border border-slate-800">
+              <span class="text-slate-400 text-[10px] block">Tasks Done</span>
+              <span class="text-lg font-black text-amber-400">${wallet.completedTaskCount || 0}</span>
+            </div>
+          </div>
+
+          <div class="p-3 bg-slate-950 rounded-2xl border border-slate-800">
+            <span class="font-bold text-slate-300 block mb-1">Bank Account Information</span>
+            ${b ? `
+              <div class="grid grid-cols-2 gap-2 text-[11px]">
+                <div><span class="text-slate-500">Bank:</span> <strong class="text-white">${b.bankName}</strong></div>
+                <div><span class="text-slate-500">Holder:</span> <strong class="text-white">${b.accountHolderName}</strong></div>
+                <div><span class="text-slate-500">A/C:</span> <strong class="text-white font-mono">${b.accountNumber}</strong></div>
+                <div><span class="text-slate-500">IFSC:</span> <strong class="text-amber-400 font-mono">${b.ifscCode}</strong></div>
+              </div>
+            ` : '<span class="text-slate-500 italic">User has not linked bank account yet.</span>'}
+          </div>
+
+          <div>
+            <span class="font-bold text-slate-300 block mb-2">Recent Transactions (${userTxns.length})</span>
+            <div class="space-y-1.5 max-h-36 overflow-y-auto">
+              ${userTxns.map(tx => `
+                <div class="p-2 bg-slate-950 rounded-xl flex justify-between items-center text-[11px] border border-slate-800/60">
+                  <div>
+                    <span class="text-white font-medium block">${tx.description}</span>
+                    <span class="text-[10px] text-slate-500 font-mono">${new Date(tx.createdAt).toLocaleString()}</span>
+                  </div>
+                  <span class="font-black ${tx.type === 'credit' ? 'text-emerald-400' : 'text-rose-400'}">
+                    ${tx.type === 'credit' ? '+' : '-'}₹${tx.amount}
+                  </span>
+                </div>
+              `).join('') || '<div class="text-slate-500 italic py-2">No transactions recorded yet</div>'}
+            </div>
+          </div>
+
+          <div class="flex gap-2 pt-2">
+            <button onclick="document.getElementById('userDetailsModal').remove(); openAdjustBalanceModal('${uid}', 'credit')" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold cursor-pointer">
+              + Credit Wallet
+            </button>
+            <button onclick="document.getElementById('userDetailsModal').remove()" class="px-4 py-2.5 bg-slate-800 text-slate-300 rounded-xl font-bold cursor-pointer">
+              Close
+            </button>
+          </div>
+        </div>
+      `;
+    };
+
+    window.toggleUserStatus = function(uid) {
+      const state = getState();
+      const user = state.users[uid];
+      if (!user) return;
+      const nextStatus = user.status === 'suspended' ? 'active' : 'suspended';
+      user.status = nextStatus;
+      addAuditLog(state, 'TOGGLE_USER_STATUS', uid, `Changed status to ${nextStatus}`);
+      saveState(state);
+      renderAdmin();
+      showToast(`User ${user.phone || uid} is now ${nextStatus}.`);
+    };
+
+    window.saveSettingsFromAdmin = async function(e) {
+      e.preventDefault();
+      const state = getState();
+      state.settings = state.settings || {};
+      state.settings.signupBonus = Number(document.getElementById('cfgSignup').value) || 20;
+      state.settings.referralReward = Number(document.getElementById('cfgRef').value) || 20;
+      state.settings.requiredReferralTasks = Number(document.getElementById('cfgTasksReq').value) || 3;
+      state.settings.supportTelegram = document.getElementById('cfgTg').value.trim() || 'https://t.me/luckyuserbonus';
+
+      addAuditLog(state, 'UPDATE_SETTINGS', 'Settings', 'Updated platform rewards and configuration');
+      if (window.saveStateToFirebase) {
+        await window.saveStateToFirebase(state);
+      }
+      saveState(state);
+      renderAdmin();
+      showToast('✓ Platform configuration saved successfully!');
     };
 
     renderAdmin();

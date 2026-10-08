@@ -29,6 +29,7 @@ export const UserManagement: React.FC = () => {
   const [adjustAmount, setAdjustAmount] = useState('');
   const [adjustReason, setAdjustReason] = useState('');
   const [adjustError, setAdjustError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [activeUserDetailTab, setActiveUserDetailTab] = useState<'info' | 'tasks' | 'wallet' | 'referrals' | 'withdrawals'>('info');
 
   const usersList = Object.values(state.users);
@@ -43,7 +44,7 @@ export const UserManagement: React.FC = () => {
     );
   });
 
-  const handleAdjustBalance = (e: React.FormEvent) => {
+  const handleAdjustBalance = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdjustError(null);
     if (!balanceModal.user) return;
@@ -53,16 +54,13 @@ export const UserManagement: React.FC = () => {
       setAdjustError('Please enter a valid positive amount');
       return;
     }
-    if (!adjustReason.trim()) {
-      setAdjustError('Please enter an audit reason for balance adjustment');
-      return;
-    }
+    const reasonText = adjustReason.trim() || `Admin manual ${balanceModal.type} adjustment`;
 
-    const res = dbService.adjustUserBalance(
+    const res = await dbService.adjustUserBalance(
       balanceModal.user.uid,
       amt,
       balanceModal.type,
-      adjustReason.trim(),
+      reasonText,
       'ADMIN_8471835378'
     );
 
@@ -70,6 +68,12 @@ export const UserManagement: React.FC = () => {
       setAdjustError(res.error || 'Failed to adjust balance');
       return;
     }
+
+    const targetUid = balanceModal.user.uid;
+    const actionType = balanceModal.type === 'credit' ? 'credited to' : 'deducted from';
+    const newBal = typeof res.newBalance === 'number' ? ` New Balance: ₹${res.newBalance}` : '';
+    setActionNotice(`✓ Successfully ${actionType} ₹${amt} for user ${targetUid}!${newBal}`);
+    setTimeout(() => setActionNotice(null), 5000);
 
     setBalanceModal({ isOpen: false, type: 'credit', user: null });
     setAdjustAmount('');
@@ -83,6 +87,19 @@ export const UserManagement: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Action Notification Banner */}
+      {actionNotice && (
+        <div className="p-3.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded-2xl text-xs flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="font-bold">{actionNotice}</span>
+          </div>
+          <button onClick={() => setActionNotice(null)} className="text-slate-400 hover:text-white">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -245,9 +262,19 @@ export const UserManagement: React.FC = () => {
               </button>
             </div>
 
-            <p className="text-xs text-slate-400">
-              User UID: <span className="text-amber-400 font-mono font-bold">{balanceModal.user.uid}</span> (+91 {balanceModal.user.phone})
-            </p>
+            <div className="flex items-center justify-between text-xs bg-slate-800/80 p-3 rounded-2xl border border-slate-700/60">
+              <div>
+                <span className="text-slate-400 block text-[10px]">User Profile</span>
+                <span className="text-white font-bold">{balanceModal.user.phone}</span>
+                <span className="text-slate-500 font-mono text-[10px] ml-1.5">({balanceModal.user.uid})</span>
+              </div>
+              <div className="text-right">
+                <span className="text-slate-400 block text-[10px]">Current Balance</span>
+                <span className="text-base font-black text-emerald-400">
+                  ₹{state.wallets[balanceModal.user.uid]?.balance || 0}
+                </span>
+              </div>
+            </div>
 
             {adjustError && (
               <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-xl">
@@ -257,9 +284,24 @@ export const UserManagement: React.FC = () => {
 
             <form onSubmit={handleAdjustBalance} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Amount (₹)
-                </label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Amount (₹)
+                  </label>
+                  <span className="text-[10px] text-slate-400">Tap preset to fill:</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {[10, 20, 50, 100, 200, 500].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAdjustAmount(preset.toString())}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 active:scale-95 text-amber-400 border border-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
+                    >
+                      +₹{preset}
+                    </button>
+                  ))}
+                </div>
                 <input
                   type="number"
                   min="1"

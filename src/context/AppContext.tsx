@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { dbService, AppState } from '../services/db';
 import { User, Wallet } from '../types';
+import { db } from '../services/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 interface AppContextType {
   state: AppState;
@@ -89,15 +91,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const savedUid = localStorage.getItem(CURRENT_USER_KEY);
       if (savedUid && state.users[savedUid]) {
         setCurrentUser(state.users[savedUid]);
-      } else {
-        // If no user is logged in, auto-login or pick the first user or leave empty
-        const firstUser = Object.values(state.users)[0];
-        if (!savedUid && firstUser) {
-          // Keep unlogged so user can see signup/login experience
-        }
       }
     }
   }, [state.users]);
+
+  // Real-time listener for current user's wallet document
+  useEffect(() => {
+    if (!currentUser?.uid || !db) return;
+    try {
+      const unsub = onSnapshot(doc(db, 'earncash_wallets', currentUser.uid), (snap) => {
+        if (snap.exists()) {
+          const w = snap.data() as Wallet;
+          if (w && typeof w.balance === 'number') {
+            dbService.updateWalletLocally(w);
+          }
+        }
+      }, (err) => console.warn('User wallet listener notice:', err));
+      return () => unsub();
+    } catch (e) {
+      console.warn('Wallet listener error:', e);
+    }
+  }, [currentUser?.uid]);
 
   const loginUser = (user: User) => {
     setCurrentUser(user);

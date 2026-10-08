@@ -54,7 +54,8 @@ export const TaskSubmissions: React.FC = () => {
           setSelectedProof(null);
         }
       } else {
-        alert(res.error || 'Failed to approve');
+        setActionNotice(res.error || 'Failed to approve');
+        setTimeout(() => setActionNotice(null), 4000);
       }
     } finally {
       setActionLoading(null);

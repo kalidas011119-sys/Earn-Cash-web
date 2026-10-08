@@ -16,8 +16,6 @@ import {
   Clock,
   User,
   Bell,
-  ShieldAlert,
-  Download,
   X
 } from 'lucide-react';
 
@@ -29,45 +27,15 @@ export const UserApp: React.FC = () => {
     currentUser,
     setShowAuthModal,
     setAuthMode,
-    setActivePanel,
     state
   } = useApp();
 
   const [showNotifications, setShowNotifications] = useState(false);
-  const [showExportModal, setShowExportModal] = useState(false);
 
   const unreadNotifs = state.notifications.filter((n) => n.isActive);
 
   return (
     <div className="min-h-screen bg-slate-900/5 sm:bg-slate-900/90 flex flex-col items-center justify-start sm:p-4">
-      {/* Top Bar for Dev / Switcher on larger screens */}
-      <div className="w-full max-w-md hidden sm:flex items-center justify-between pb-3 text-xs text-white/80">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="font-bold text-white tracking-wide">Earn Cash v2.4</span>
-          <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded text-white/70">
-            Realtime DB Connected
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowExportModal(true)}
-            className="flex items-center gap-1 px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg transition"
-            title="Download single HTML files"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Single HTML</span>
-          </button>
-          <button
-            onClick={() => setActivePanel('admin')}
-            className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-900 font-bold rounded-lg shadow hover:opacity-95 transition"
-          >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>Switch to Admin</span>
-          </button>
-        </div>
-      </div>
-
       {/* Mobile Device Frame */}
       <div className="w-full max-w-md bg-slate-50 min-h-screen sm:min-h-[844px] sm:max-h-[92vh] sm:rounded-[36px] shadow-2xl flex flex-col overflow-hidden relative border border-slate-200/60 sm:border-slate-800">
         {/* Android App Top Header */}
@@ -100,15 +68,6 @@ export const UserApp: React.FC = () => {
               {unreadNotifs.length > 0 && (
                 <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-yellow-400 ring-2 ring-emerald-600" />
               )}
-            </button>
-
-            {/* Admin Switcher icon for mobile */}
-            <button
-              onClick={() => setActivePanel('admin')}
-              className="sm:hidden p-1.5 rounded-full bg-amber-400 text-slate-900 font-bold text-xs"
-              title="Admin Panel"
-            >
-              <ShieldAlert className="w-4 h-4" />
             </button>
           </div>
         </header>
@@ -216,61 +175,6 @@ export const UserApp: React.FC = () => {
       {/* Global Modals */}
       <AuthModal />
       <TaskSubmissionModal />
-
-      {/* Export / Single HTML Modal */}
-      {showExportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
-            <div className="flex justify-between items-center">
-              <h3 className="font-bold text-base text-slate-800">
-                Single HTML File Code Exporter
-              </h3>
-              <button
-                onClick={() => setShowExportModal(false)}
-                className="p-1 rounded-full hover:bg-slate-100 text-slate-400"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              As requested, the User Panel and Admin Panel are also generated as completely independent, standalone single HTML files containing all HTML, CSS, JavaScript, and Firebase synchronization code.
-            </p>
-
-            <div className="space-y-2 pt-2">
-              <a
-                href="/user_panel.html"
-                target="_blank"
-                rel="noreferrer"
-                className="w-full p-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-bold text-emerald-800 transition"
-              >
-                <span>📱 Open User Panel (Single HTML)</span>
-                <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full">
-                  user_panel.html
-                </span>
-              </a>
-
-              <a
-                href="/admin_panel.html"
-                target="_blank"
-                rel="noreferrer"
-                className="w-full p-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-2xl flex items-center justify-between text-xs font-bold text-amber-900 transition"
-              >
-                <span>🛡️ Open Admin Panel (Single HTML)</span>
-                <span className="text-[10px] bg-amber-600 text-white px-2 py-0.5 rounded-full">
-                  admin_panel.html
-                </span>
-              </a>
-            </div>
-
-            <button
-              onClick={() => setShowExportModal(false)}
-              className="w-full py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

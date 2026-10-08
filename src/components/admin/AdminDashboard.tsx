@@ -37,7 +37,8 @@ export const AdminDashboard: React.FC = () => {
         setActionNotice(`Successfully approved! ₹${taskReward} credited to user wallet.`);
         setTimeout(() => setActionNotice(null), 4000);
       } else {
-        alert(res.error || 'Failed to approve');
+        setActionNotice(res.error || 'Failed to approve');
+        setTimeout(() => setActionNotice(null), 4000);
       }
     } finally {
       setActionLoading(null);
